@@ -1,0 +1,173 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+
+export const runtime = 'nodejs'
+
+/**
+ * GET /api/public/activities
+ * 用户侧：拉所有 active 活动 + 关联拼团 + 满减券
+ *
+ * Query: type? (banner|promotion|flash_sale|...)
+ *
+ * 返回:
+ * {
+ *   success: true,
+ *   banners: [],      // banner 类型
+ *   flashSales: [],   // flash_sale 类型
+ *   discounts: [],    // discount 类型
+ *   coupons: [],      // 可领取的满减券（Coupon 表里 name 含"满 X 减 Y"）
+ *   groupBuys: [],    // 拼团（带 currentPeople/requiredPeople）
+ * }
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const now = new Date()
+
+    // 1. 拉所有 published 且在有效期的活动
+    const activities = await prisma.activity.findMany({
+      where: {
+        status: 'published',
+        startAt: { lte: now },
+        endAt: { gte: now },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+
+    const banners = activities
+      .filter((a) => a.type === 'banner')
+      .map((a) => ({
+        id: a.id,
+        title: a.title,
+        subtitle: a.subtitle || '',
+        description: a.description || '',
+        coverImage: a.coverImage || '',
+        endAt: a.endAt.toISOString(),
+      }))
+
+    // Demo 阶段：如果没 banner 类型，把第一个 active 活动当 banner（视觉一致）
+    if (banners.length === 0 && activities.length > 0) {
+      const first = activities[0]
+      banners.push({
+        id: first.id,
+        title: `🎉 ${first.title}`,
+        subtitle: first.subtitle || '',
+        description: first.description || '',
+        coverImage: first.coverImage || '',
+        endAt: first.endAt.toISOString(),
+      })
+    }
+
+    const flashSales = activities
+      .filter((a) => a.type === 'flash_sale')
+      .map((a) => {
+        // 从 productIds 解析商品 ID 列表
+        let productIds: string[] = []
+        try {
+          const raw = a.productIds
+          if (raw) {
+            productIds = typeof raw === 'string' ? JSON.parse(raw) : raw
+          }
+        } catch {
+          productIds = []
+        }
+        return {
+          id: a.id,
+          title: a.title,
+          subtitle: a.subtitle || '',
+          productIds,
+          endAt: a.endAt.toISOString(),
+        }
+      })
+
+    const discounts = activities
+      .filter((a) => a.type === 'discount' || a.type === 'promotion')
+      .map((a) => ({
+        id: a.id,
+        title: a.title,
+        subtitle: a.subtitle || '',
+        description: a.description || '',
+        endAt: a.endAt.toISOString(),
+      }))
+
+    // 2. Coupon 表：demo 阶段——所有未使用且未过期的券都可领（不管 phone）
+    // 上线后改成 "phone IS NULL OR phone = ''" 区分全局券 vs 个人券
+    const couponsRaw = await prisma.$queryRaw<any[]>`
+      SELECT id, name, value, minSpend, expiresAt
+      FROM Coupon
+      WHERE status = 'unused'
+        AND (expiresAt IS NULL OR expiresAt > datetime('now'))
+      ORDER BY minSpend ASC, value DESC
+      LIMIT 20
+    `
+    const coupons = couponsRaw.map((c) => ({
+      id: c.id,
+      name: c.name,
+      value: Number(c.value ?? 0),
+      minSpend: Number(c.minSpend ?? 0),
+      expiresAt: c.expiresAt,
+    }))
+
+    // 3. GroupBuy 表：active 状态的拼团 + 真实人数
+    const groupBuysRaw = await prisma.$queryRaw<any[]>`
+      SELECT g.id, g.productId, g.productName, g.productSpec,
+             g.originalPrice, g.groupPrice, g.requiredPeople, g.currentPeople,
+             g.expiresAt, g.status,
+             (SELECT COUNT(*) FROM GroupMember m WHERE m.groupId = g.id) as memberCount
+      FROM GroupBuy g
+      WHERE g.status = 'active'
+        AND g.expiresAt > datetime('now')
+      ORDER BY g.createdAt DESC
+      LIMIT 20
+    `
+    const groupBuys = groupBuysRaw.map((g) => ({
+      id: g.id,
+      productId: g.productId,
+      productName: g.productName,
+      productSpec: g.productSpec,
+      originalPrice: Number(g.originalPrice ?? 0),
+      groupPrice: Number(g.groupPrice ?? 0),
+      requiredPeople: Number(g.requiredPeople ?? 3),
+      currentPeople: Number(Math.max(Number(g.currentPeople ?? 1), Number(g.memberCount ?? 0))),
+      expiresAt: g.expiresAt,
+      icon: guessIcon(g.productName),
+    }))
+
+    // 把所有可能的 BigInt 转 Number（SQLite COUNT(*) 默认 BigInt）
+    const safeBigInts = (obj: any): any => {
+      const out: any = {}
+      for (const k in obj) {
+        const v = obj[k]
+        if (typeof v === 'bigint') out[k] = Number(v)
+        else out[k] = v
+      }
+      return out
+    }
+
+    return NextResponse.json({
+      success: true,
+      banners: banners.map(safeBigInts),
+      flashSales: flashSales.map(safeBigInts),
+      discounts: discounts.map(safeBigInts),
+      coupons: coupons.map(safeBigInts),
+      groupBuys: groupBuys.map(safeBigInts),
+      serverTime: now.toISOString(),
+    })
+  } catch (error: any) {
+    console.error('[public/activities] Error:', error)
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+  }
+}
+
+// 商品名猜 icon（保留视觉一致性，等真实图片接入后可删）
+function guessIcon(name: string): string {
+  if (/vc|维c|维生素|泡腾/i.test(name)) return '🍊'
+  if (/口罩|外科/i.test(name)) return '😷'
+  if (/感冒|999|板蓝根|颗粒/i.test(name)) return '🍵'
+  if (/体温|温度计/i.test(name)) return '🌡️'
+  if (/创可贴|云南白药/i.test(name)) return '🩹'
+  if (/棉签/i.test(name)) return '🌿'
+  if (/胶囊/i.test(name)) return '💊'
+  return '🍵'
+}

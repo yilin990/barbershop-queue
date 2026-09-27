@@ -1,0 +1,292 @@
+'use client'
+
+/**
+ * AI 找药页 · 奕霖 2026-07-02 新建
+ *
+ * 不同于：
+ *  - /search: 搜索结果列表页（已存在）
+ *  - /products: 商品分类浏览页（已存在）
+ *
+ * 这是"AI 找药主页"，专注于"对话式找药"：
+ *  - 大搜索框 + 语音输入入口
+ *  - 25 个分类卡片（症状驱动）
+ *  - 热门症状速选
+ *  - AI 推荐位（吸睛的"立即问"）
+ *
+ * 创建原因：奕霖从 /merchant 的"精选商品"块抽离出来，
+ * 改为 AI 找药入口，跳到这里。
+ */
+
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import AppLayout from '@/components/AppLayout'
+import { BUSINESS_CONFIG } from '@/config/business.config'
+
+const GREEN = '#7fdc94'
+const GREEN_RGBA = '127, 220, 148'
+
+// 热门分类（精选 7 个最常见症状，2026-08-07 奕霖要求：剔除慢病用药）
+const HOT_CATEGORIES = [
+  { icon: '🤧', name: '感冒咳嗽', desc: '风寒/风热/止咳' },
+  { icon: '🤕', name: '头痛发烧', desc: '退烧止痛' },
+  { icon: '😷', name: '鼻炎过敏', desc: '喷剂/抗过敏' },
+  { icon: '🍵', name: '肠胃不适', desc: '胃炎/腹泻/便秘' },
+  { icon: '🦷', name: '口腔护理', desc: '牙疼/口腔溃疡' },
+  { icon: '🩹', name: '外伤护理', desc: '创可贴/消毒' },
+  { icon: '👶', name: '母婴儿童', desc: '儿童专用药' },
+]
+
+// ⭐ MEMORY 183 — 2026-08-07 奕霖指令：处方药整条移出线上体系
+// 删掉 Rx 风险分类：糖尿病、高血压、心脑血管、肝胆用药、神经系统、补益用药、妇科用药
+const ALL_CATEGORIES = [
+  '感冒咳嗽', '皮肤外用', '日用品', '医疗器械', '食品营养',
+  '风湿骨痛', '消毒用品', '清热解毒', '肠胃用药',
+  '儿科用药', '口腔咽喉', '眼耳疾病', '皮肤用药',
+  '抗过敏', '外用消炎', '营养补充', '体检筛查', '保健品',
+]
+
+export default function AIFindDrugPage() {
+  const router = useRouter()
+  const [query, setQuery] = useState('')
+  const { name } = BUSINESS_CONFIG
+
+  // 立即搜药
+  const handleSearch = () => {
+    if (query.trim()) {
+      router.push(`/search?q=${encodeURIComponent(query.trim())}`)
+    } else {
+      router.push('/search')
+    }
+  }
+
+  // 进入 果小蔬对话
+  const handleAIConsult = () => {
+    router.push('/pharmacist')
+  }
+
+  // 进入商品分类
+  const handleCategory = (cat: string) => {
+    router.push(`/products?category=${encodeURIComponent(cat)}`)
+  }
+
+  return (
+    <AppLayout title="AI 找药">
+      {/* ⭐ 奕霖 2026-07-24 16:53 反馈图：FAB 压住最后几件商品「加入购物车」按钮。FAB 顶 y ≈ bottom(96)+52=148 → paddingBottom 180 清理 */}
+      <div style={{ padding: '8px 16px 180px' }}>
+        {/* ============ Hero 区：大搜索框 ============ */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(127,220,148,0.18) 0%, rgba(127,220,148,0.06) 100%)',
+          border: '1.5px solid rgba(127,220,148,0.35)',
+          borderRadius: '20px',
+          padding: '24px 20px',
+          marginBottom: '16px',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '40px', marginBottom: '8px' }}>🤖</div>
+          <h1 style={{
+            fontSize: '22px', fontWeight: 800, color: '#fff',
+            marginBottom: '6px', letterSpacing: '-0.5px',
+          }}>AI 找药</h1>
+          <p style={{
+            fontSize: '13px', color: GREEN,
+            fontWeight: 500, marginBottom: '18px',
+          }}>说症状 · AI 帮你选合适的药品</p>
+
+          {/* 大搜索框 */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'rgba(10, 20, 15, 0.5)',
+            border: '1px solid rgba(127, 220, 148, 0.3)',
+            borderRadius: '14px',
+            padding: '4px 4px 4px 14px',
+          }}>
+            <span style={{ fontSize: '16px', opacity: 0.7 }}>🔍</span>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="说症状或药名，如“我感冒了”"
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: '#fff',
+                fontSize: '15px',
+                padding: '12px 4px',
+                fontFamily: 'inherit',
+              }}
+            />
+            <button
+              onClick={handleSearch}
+              style={{
+                background: 'linear-gradient(135deg, #2dd4bf, #14b8a6)',
+                color: '#0a0f0d',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '10px 16px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >搜药</button>
+          </div>
+        </div>
+
+        {/* ============ AI 立即问（突出入口）============ */}
+        <button
+          onClick={handleAIConsult}
+          style={{
+            width: '100%',
+            padding: '16px 20px',
+            marginBottom: '20px',
+            background: 'linear-gradient(135deg, rgba(127,220,148,0.25), rgba(45,212,191,0.12))',
+            border: '1.5px solid rgba(127,220,148,0.4)',
+            borderRadius: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            cursor: 'pointer',
+            textAlign: 'left',
+            boxShadow: '0 6px 20px rgba(127,220,148,0.18)',
+          }}
+        >
+          <div style={{
+            width: 44, height: 44,
+            background: 'linear-gradient(135deg, #2dd4bf, #14b8a6)',
+            borderRadius: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 22, flexShrink: 0,
+          }}>🍵</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: 2 }}>
+              让 果小蔬帮你选
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'rgba(127, 220, 148, 0.7)' }}>
+              对话式问诊 · 24h 在线 · 一键下单取货
+            </div>
+          </div>
+          <div style={{ fontSize: '20px', color: GREEN, opacity: 0.7 }}>›</div>
+        </button>
+
+        {/* ============ 热门分类（速选）============ */}
+        <div style={{
+          background: 'rgba(35, 74, 53, 0.3)',
+          borderRadius: '16px',
+          padding: '18px 16px',
+          marginBottom: '16px',
+          border: '1px solid rgba(127, 220, 148, 0.1)',
+        }}>
+          <h2 style={{
+            fontSize: 14, fontWeight: 700, color: '#fff',
+            marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span>🔥</span> 常见症状速选
+            <span style={{
+              fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.4)',
+              marginLeft: 'auto',
+            }}>点选即可</span>
+          </h2>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: '8px',
+          }}>
+            {HOT_CATEGORIES.map((cat, i) => (
+              <button
+                key={i}
+                onClick={() => handleCategory(cat.name)}
+                style={{
+                  padding: '12px 4px',
+                  background: 'rgba(127, 220, 148, 0.06)',
+                  border: '1px solid rgba(127, 220, 148, 0.15)',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(127, 220, 148, 0.15)'
+                  e.currentTarget.style.borderColor = 'rgba(127, 220, 148, 0.4)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(127, 220, 148, 0.06)'
+                  e.currentTarget.style.borderColor = 'rgba(127, 220, 148, 0.15)'
+                }}
+              >
+                <div style={{ fontSize: '24px', marginBottom: '4px' }}>{cat.icon}</div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#fff', marginBottom: '2px' }}>{cat.name}</div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)' }}>{cat.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ============ 全部分类（浏览）============ */}
+        <div style={{
+          background: 'rgba(35, 74, 53, 0.3)',
+          borderRadius: '16px',
+          padding: '18px 16px',
+          marginBottom: '16px',
+          border: '1px solid rgba(127, 220, 148, 0.1)',
+        }}>
+          <h2 style={{
+            fontSize: 14, fontWeight: 700, color: '#fff',
+            marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span>📋</span> 全部分类
+            <span style={{
+              fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.4)',
+              marginLeft: 'auto',
+            }}>{ALL_CATEGORIES.length} 类</span>
+          </h2>
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '6px',
+          }}>
+            {ALL_CATEGORIES.map((cat, i) => (
+              <button
+                key={i}
+                onClick={() => handleCategory(cat)}
+                style={{
+                  padding: '6px 12px',
+                  background: 'rgba(127, 220, 148, 0.05)',
+                  border: '1px solid rgba(127, 220, 148, 0.15)',
+                  borderRadius: '100px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  color: 'rgba(255,255,255,0.75)',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(127, 220, 148, 0.18)'
+                  e.currentTarget.style.borderColor = 'rgba(127, 220, 148, 0.4)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(127, 220, 148, 0.05)'
+                  e.currentTarget.style.borderColor = 'rgba(127, 220, 148, 0.15)'
+                }}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{
+          textAlign: 'center', padding: '16px 0',
+          fontSize: 11, color: 'rgba(255,255,255,0.3)',
+        }}>
+          © 2026 {name} · AI 找药
+        </div>
+      </div>
+    </AppLayout>
+  )
+}

@@ -1,0 +1,265 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import BottomTabBar from './BottomTabBar'
+import AgreementGate from './AgreementGate'
+import AIRiskHint from './AIRiskHint'
+import { ToastContainer, ConfirmDialog } from './UIController'
+import AddToHomeScreen from './AddToHomeScreen'
+
+/** 根页面列表（这些页面不显示返回键，因为已经是顶层）
+ * 注意：/chat 全屏模式下 hideBottomTabBar=true，需要返回键
+ * （奕霖 2026-06-30 18:28 反馈：AI 药师页找不到返回）
+ */
+const ROOT_PATHS = ['/', '/me', '/merchant', '/community', '/orders', '/stores']
+
+interface AppLayoutProps {
+  children: React.ReactNode
+  /** 当前页面标题 */
+  title?: string
+  /** 是否显示顶部栏（默认显示） */
+  showHeader?: boolean
+  /** 顶部背景色（默认深色玻璃） */
+  headerBg?: string
+  /** 自定义顶部右侧内容 */
+  headerRight?: React.ReactNode
+  /** 底部Tab高亮时的URL（自动从pathname检测，可手动传） */
+  activePath?: string
+  /** 强制隐藏返回键（默认自动判断） */
+  hideBack?: boolean
+  /** 全屏模式（聊天页使用）：主内容区 = calc(100dvh - header高度) */
+  fullHeight?: boolean
+  /** 隐藏底部TabBar（聊天页使用，避免与输入法冲突） */
+  hideBottomTabBar?: boolean
+}
+
+export default function AppLayout({
+  children,
+  title,
+  showHeader = true,
+  headerBg,
+  headerRight,
+  hideBack = false,
+  fullHeight = false,
+  hideBottomTabBar = false,
+}: AppLayoutProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const [mounted, setMounted] = useState(false)
+  // ⭐ 2026-09-20 23:02 奕霖拍板：queue 界面完全适配手机端
+  // 响应式 maxWidth——手机端（≤480px）100% 铺满，桌面端 >480px 保持 420px 居中
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    const checkMobile = () => setIsMobile(window.innerWidth <= 480)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  if (!mounted) {
+    return null
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: '100dvh',
+        background: 'linear-gradient(175deg, #faf6f0 0%, #fffaf0 40%, #f5ead3 70%, #fffaf0 100%)',
+        fontFamily: "'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif",
+        color: '#2c1810',
+        position: 'relative',
+      }}
+    >
+      {/* Ambient glow effects */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '-120px',
+          right: '-100px',
+          width: '350px',
+          height: '350px',
+          background: 'radial-gradient(circle, rgba(184, 134, 11, 0.10) 0%, transparent 70%)',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
+      <div
+        style={{
+          position: 'fixed',
+          bottom: '150px',
+          left: '-100px',
+          width: '300px',
+          height: '300px',
+          background: 'radial-gradient(circle, rgba(184, 134, 11, 0.07) 0%, transparent 70%)',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
+      <div
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: '500px',
+          height: '500px',
+          background: 'radial-gradient(circle, rgba(245, 234, 211, 0.12) 0%, transparent 70%)',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
+
+      {/* Top Header Bar */}
+      {showHeader && (
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 90,
+            background: headerBg || 'linear-gradient(180deg, rgba(250, 246, 240, 0.90) 0%, rgba(250, 246, 240, 0.80) 100%)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(184, 134, 11, 0.08)',
+            padding: 'calc(12px + env(safe-area-inset-top, 0px)) 20px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          {/* Left: Back Button + Logo + Title */}
+          {showHeader && !hideBack && !ROOT_PATHS.includes(pathname || '') && (
+            <button
+              onClick={() => router.back()}
+              aria-label="返回上一级"
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: 'rgba(184, 134, 11, 0.08)',
+                border: '1px solid rgba(184, 134, 11, 0.2)',
+                color: '#b8860b',
+                fontSize: '18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+                padding: 0,
+                lineHeight: 1,
+              }}
+            >
+              ‹
+            </button>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.2) 0%, rgba(184, 134, 11, 0.06) 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                border: '1px solid rgba(184, 134, 11, 0.2)',
+                flexShrink: 0,
+              }}
+            >
+              🍵
+            </div>
+            <div style={{ minWidth: 0 }}>
+              {title ? (
+                // ⭐ 奕霖 2026-07-06 02:04：手机端强制单行（之前自动换行成竖排挤空间）
+                <span
+                  style={{
+                    fontSize: '16px',
+                    fontWeight: 700,
+                    color: '#b8860b',
+                    letterSpacing: '2px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: 'min(220px, calc(100vw - 240px))',
+                  }}
+                >
+                  {title}
+                </span>
+              ) : (
+                <span
+                  style={{
+                    fontSize: '15px',
+                    fontWeight: 700,
+                    color: '#b8860b',
+                    letterSpacing: '2px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  果蔬鲜生
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Right: custom content slot */}
+          {headerRight && <div style={{ flexShrink: 0 }}>{headerRight}</div>}
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      {/* ⭐ 2026-09-20 23:02 奕霖拍板：queue 界面完全适配手机端
+          修法：响应式 maxWidth——手机端（≤480px）100% 铺满，桌面端 >480px 保持 420px 居中 */}
+      <div
+        style={{
+          maxWidth: isMobile ? '100%' : '420px',
+          margin: '0 auto',
+          position: 'relative',
+          zIndex: 1,
+          // 奕霖 2026-08-01 23:56 反馈"底部 tab bar 上方黑屏"→ 内容底部 padding 必须 >= BottomTabBar 实际占位 (72px + safe-area-inset-bottom)
+          padding: hideBottomTabBar
+            ? '0 20px 20px'
+            : '0 16px calc(80px + env(safe-area-inset-bottom, 0px))',
+          // 全屏模式（聊天页）：固定高度让 children 100% 生效
+          height: fullHeight ? 'calc(100dvh - 70px - env(safe-area-inset-top, 0px))' : 'auto',
+          minHeight: fullHeight ? 'auto' : undefined,
+          display: fullHeight ? 'flex' : undefined,
+          flexDirection: fullHeight ? 'column' : undefined,
+          overflow: fullHeight ? 'hidden' : undefined,
+        }}
+      >
+        {/* ⭐ 奕霖 2026-07-06 13:37：合规确认 - 全屏遮罩，未同意不显示内容 */}
+        <AgreementGate>{children}</AgreementGate>
+      </div>
+
+      {/* Bottom Tab Bar */}
+      {!hideBottomTabBar && <BottomTabBar />}
+
+      {/* ⭐ 奕霖 2026-07-06 13:37：AI 风险提示（仅 /chat 显示，24h 冷却） */}
+      {(pathname === '/chat') && <AIRiskHint />}
+
+      {/* ⭐ 奕霖 2026-07-18 00:16 反馈：购物车小浮窗（消费者页面，商家/店员/订单详情除外） */}
+      {mounted && !(
+        pathname === '/cart' ||
+        pathname === '/pickup' ||
+        pathname?.startsWith('/admin') ||
+        pathname?.startsWith('/merchant') ||
+        pathname === '/login' ||
+        pathname === '/agreement' ||
+        pathname === '/privacy-policy' ||
+        pathname === '/user-agreement' ||
+        pathname?.startsWith('/orders/')
+        // ⭐ 奕霖 2026-07-24 17:22 反馈“把浮窗购物车去掉”;2026-08-26 确认永不恢复(用购物车 tab 内嵌视图 CartInlineView 替代)
+      ) && null}
+
+      {/* ⭐ 奕霖 2026-07-25 00:40 反馈：弹窗提示优化升级为主题款（不再是白色经典 alert）*/}
+      <AddToHomeScreen />
+      <ToastContainer />
+      <ConfirmDialog />
+    </div>
+  )
+}

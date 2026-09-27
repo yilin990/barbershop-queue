@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.DS_Store
+.bak-*
+.archive-*
+*.log
+*.db
+*.db-journal
+backups/
+public/uploads/
+.mobile-test/
+.env
+.env.local
+*.key
+*.pem

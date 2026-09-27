@@ -1,0 +1,945 @@
+'use client'
+
+import { confirmDialog } from '@/lib/ui-bus'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import AppLayout from '@/components/AppLayout'
+import { useUserStore } from '@/stores/userStore'
+import { MEMBERSHIP_TIERS } from '@/domain/membership/tier'
+
+interface MeSummary {
+  success: boolean
+  isDemo: boolean
+  user: {
+    id: string
+    phone: string
+    nickname: string
+    avatar: string
+    role: string
+    points: number
+    totalSpent: number
+    totalOrders: number
+  } | null
+  nextTier: {
+    name: string
+    icon: string
+    minSpent: number
+    need: number
+    progress: number
+  } | null
+}
+
+const TIER_LABELS: Record<string, { label: string; icon: string }> = {
+  '普通': { label: '普通会员', icon: '🌱' },
+  '银卡': { label: '银卡会员', icon: '🥈' },
+  '金卡': { label: '金卡会员', icon: '🥇' },
+  'VIP': { label: 'VIP 会员', icon: '👑' },
+}
+
+// 真实积分兑换商品（GET /api/points/redeem）
+interface RedeemProduct {
+  id: string
+  pointsRequired: number
+  originalPrice: number
+  stock: number
+  productId: string
+  name: string
+  shortName: string | null
+  spec: string | null
+  image: string | null
+  unit: string | null
+  category: string | null
+  currentPrice: number
+}
+
+export default function PointsPage() {
+  const router = useRouter()
+  const [tab, setTab] = useState<'mall' | 'history'>('mall')
+  const [data, setData] = useState<MeSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const { user: storeUser, updateUser } = useUserStore()
+
+  // 真兑换商品 + 兑换流
+  const [redeemItems, setRedeemItems] = useState<RedeemProduct[]>([])
+  const [redeeming, setRedeeming] = useState<string | null>(null)
+  const [redeemToast, setRedeemToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  // ⭐ 奕霖 2026-08-03 00:37 升级：搜索/分类/排序 + 商品详情弹窗
+  const [mallSearch, setMallSearch] = useState('')
+  const [mallCategory, setMallCategory] = useState<string>('全部')
+  const [mallSortBy, setMallSortBy] = useState<'points' | 'price' | 'newest'>('points')
+  const [selectedProduct, setSelectedProduct] = useState<RedeemProduct | null>(null)
+
+  async function fetchRedeemItems() {
+    try {
+      const res = await fetch('/api/points/redeem', { credentials: 'include' })
+      const json = await res.json()
+      if (json.items) setRedeemItems(json.items)
+    } catch (e) {
+      console.error('[redeem] fetch failed:', e)
+    }
+  }
+
+  async function handleRedeem(p: RedeemProduct) {
+    if (redeeming) return
+    if (!await confirmDialog(`确认用 ${p.pointsRequired} 积分兑换 ${p.name}？
+将创建兑换订单，店员核销后扣积分`)) return
+    setRedeeming(p.id)
+    try {
+      const token = useUserStore.getState().token
+      const phone = user?.phone || '13800138000'
+      // ⭐ 奕霖 2026-09-06 22:37 升级: 兑换不再直接扣积分, 改成创建订单 (status=pending + source=points + remark 标识)
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          phone,
+          source: 'points',
+          remark: `积分兑换:${p.name} (-${p.pointsRequired}分,待店员核销)`,
+          actualPaidAmount: 0,
+          items: [{
+            productId: p.productId,
+            name: p.name,
+            spec: p.spec || undefined,
+            image: p.image || undefined,
+            price: p.currentPrice || 0,
+            quantity: 1,
+          }],
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setRedeemToast({ kind: 'err', text: '❌ ' + (json.error || '下单失败') })
+      } else {
+        const orderNo = json.order?.orderNo || json.order?.id || ''
+        setRedeemToast({
+          kind: 'ok',
+          text: `✅ 兑换单已创建 ${orderNo ? '(' + orderNo + ')' : ''}, 到店凭码核销`,
+        })
+        // 关弹窗 + 跳到订单详情
+        setSelectedProduct(null)
+        setTimeout(() => router.push('/orders'), 1500)
+        // 刷新商品列表 (库存不立即减,等店员核销时减;但前端先 fetch 保持数据新鲜)
+        fetchRedeemItems()
+      }
+    } catch (e: any) {
+      setRedeemToast({ kind: 'err', text: '❌ ' + (e?.message || '网络错误') })
+    } finally {
+      setRedeeming(null)
+      setTimeout(() => setRedeemToast(null), 3500)
+    }
+  }
+
+  async function fetchSummary() {
+    try {
+      const token = useUserStore.getState().token
+      const res = await fetch('/api/me/summary', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      const json = await res.json()
+      if (json.success) {
+        setData(json)
+        if (!json.isDemo && json.user) updateUser({ role: json.user.role, points: json.user.points })
+      }
+    } catch (e) {
+      console.error('[points] fetch summary failed:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchSummary()
+  }, [])
+
+  useEffect(() => { fetchRedeemItems() }, [])
+
+  // ⭐ 奕霖 2026-09-06 22:37 修复: 弹窗打开时锁背景滚动, 关闭时解锁
+  useEffect(() => {
+    if (selectedProduct) {
+      const prev = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => { document.body.style.overflow = prev }
+    }
+  }, [selectedProduct])
+
+  const user = data?.user
+  const role = user?.role || '普通'
+  const roleInfo = TIER_LABELS[role] || TIER_LABELS['普通']
+  const points = user?.points || 0
+  const value = (points * 0.01).toFixed(2)
+  const totalSpent = user?.totalSpent || 0
+  const nextTier = data?.nextTier
+  const expiringSoon = 0
+
+  return (
+    <AppLayout title="我的积分" showHeader>
+      <div style={{ padding: '16px', paddingBottom: '100px' }}>
+        {/* 顶部 - 积分大数字（真数据） */}
+        <div style={{
+          position: 'relative',
+          padding: '28px 24px',
+          borderRadius: '24px',
+          background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.18) 0%, rgba(45, 90, 61, 0.4) 100%)',
+          border: '1px solid rgba(184, 134, 11, 0.3)',
+          overflow: 'hidden',
+          marginBottom: '16px',
+        }}>
+          <div style={{
+            position: 'absolute', top: '-40px', right: '-40px',
+            width: '200px', height: '200px',
+            background: 'radial-gradient(circle, rgba(184, 134, 11, 0.3) 0%, transparent 70%)',
+          }} />
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '8px' }}>
+              我的积分余额
+            </div>
+            {loading ? (
+              <div style={{ fontSize: '32px', color: 'rgba(255,255,255,0.4)' }}>加载中…</div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '48px', fontWeight: 700, color: '#b8860b', lineHeight: 1 }}>
+                    {points.toLocaleString()}
+                  </span>
+                  <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)' }}>分</span>
+                </div>
+                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
+                  约 ¥{value} 现金价值
+                  {expiringSoon > 0 && (
+                    <> · 即将到期 <span style={{ color: '#ff9a6b' }}>{expiringSoon} 分</span></>
+                  )}
+                  {user && (
+                    <> · 累计消费 ¥{totalSpent.toFixed(2)} · {user.totalOrders} 单</>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* 等级进度条（真数据） */}
+        <div style={{
+          padding: '16px',
+          borderRadius: '16px',
+          background: 'rgba(184, 134, 11, 0.06)',
+          border: '1px solid rgba(184, 134, 11, 0.15)',
+          marginBottom: '16px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '18px' }}>{roleInfo.icon}</span>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: '#b8860b' }}>{roleInfo.label}</span>
+            </div>
+            {nextTier ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
+                  距 {nextTier.icon} {nextTier.name}
+                </span>
+                <span style={{
+                  fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
+                  background: 'rgba(255, 154, 107, 0.15)', color: '#ff9a6b',
+                }}>
+                  还差 ¥{nextTier.need.toFixed(2)}
+                </span>
+              </div>
+            ) : (
+              <span style={{ fontSize: '11px', color: '#b8860b' }}>👑 顶级会员</span>
+            )}
+          </div>
+          <div style={{ position: 'relative', height: '8px', background: 'rgba(184, 134, 11, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{
+              position: 'absolute', left: 0, top: 0, height: '100%',
+              width: `${nextTier?.progress ?? 100}%`,
+              background: 'linear-gradient(90deg, #b8860b 0%, #2dd4bf 100%)',
+              borderRadius: '4px',
+              transition: 'width 0.6s ease',
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'rgba(255,255,255,0.4)' }}>
+            {MEMBERSHIP_TIERS.map((t) => (
+              <span key={t.name} style={{ opacity: t.name === role ? 1 : 0.5 }}>{t.icon} {t.name}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* 4 种玩法入口 */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px',
+          marginBottom: '20px',
+        }}>
+          {[
+            { icon: '🎁', label: '换商品', sub: '500 积分起', color: '#b8860b', action: () => setTab('mall') },
+            { icon: '💰', label: '抵现金', sub: '100 积分起', color: '#2dd4bf', action: () => setTab('history') },
+            { icon: '🎰', label: '抽奖', sub: '50 积分/次', color: '#f472b6', action: () => alert('🎰 抽奖功能开发中\n敬请期待') },
+            { icon: '🎟️', label: '兑券', sub: '8 折优惠券', color: '#ff9a6b', action: () => router.push('/coupon') },
+          ].map((item, i) => (
+            <button key={i} onClick={item.action} style={{
+              padding: '18px 14px',
+              borderRadius: '16px',
+              background: `${item.color}1A`,
+              border: `1px solid ${item.color}40`,
+              cursor: 'pointer', textAlign: 'left',
+              transition: 'all 0.2s ease',
+            }}>
+              <div style={{ fontSize: '26px', marginBottom: '8px' }}>{item.icon}</div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff', marginBottom: '2px' }}>{item.label}</div>
+              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>{item.sub}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* 标签页：商城 / 明细 */}
+        <div style={{
+          display: 'flex', gap: '4px', padding: '4px',
+          borderRadius: '12px', background: 'rgba(255, 255, 255, 0.04)',
+          marginBottom: '16px',
+        }}>
+          {[
+            { key: 'mall', label: '积分商城' },
+            { key: 'history', label: '积分明细' },
+          ].map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key as any)} style={{
+              flex: 1, padding: '10px',
+              borderRadius: '10px', border: 'none', cursor: 'pointer',
+              background: tab === t.key ? 'rgba(184, 134, 11, 0.15)' : 'transparent',
+              color: tab === t.key ? '#b8860b' : 'rgba(255,255,255,0.6)',
+              fontSize: '13px', fontWeight: 600,
+              transition: 'all 0.2s ease',
+            }}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* ⭐ 奕霖 2026-08-03 00:37 升级：积分商城完整重构（搜索/分类/排序/详情弹窗/价格分层） */}
+        {tab === 'mall' && (
+          <>
+            {redeemToast && (
+              <div style={{
+                padding: '12px 16px', borderRadius: '12px', marginBottom: '12px',
+                background: redeemToast.kind === 'ok' ? 'rgba(45, 138, 79, 0.2)' : 'rgba(192, 57, 43, 0.2)',
+                border: `1px solid ${redeemToast.kind === 'ok' ? '#2d8a4f' : '#c0392b'}`,
+                color: '#fff', fontSize: '13px', fontWeight: 600,
+              }}>
+                {redeemToast.text}
+              </div>
+            )}
+
+            {/* A. "你能换什么" 高亮区（智能化） */}
+            {redeemItems.length > 0 && points > 0 && (() => {
+              const affordable = redeemItems.filter(p => p.pointsRequired <= points && p.stock > 0).sort((a, b) => b.pointsRequired - a.pointsRequired)
+              const top = affordable[0]
+              if (!top) return null
+              const tier = TIER_META[getPriceTier(top.pointsRequired)]
+              return (
+                <div style={{
+                  padding: '14px 18px', borderRadius: '16px',
+                  background: `linear-gradient(135deg, ${tier.color}22 0%, ${tier.color}11 100%)`,
+                  border: `1px solid ${tier.color}44`,
+                  marginBottom: '14px', position: 'relative', overflow: 'hidden',
+                }}>
+                  <div style={{ position: 'absolute', top: -20, right: -20, fontSize: 80, opacity: 0.15 }}>
+                    {tier.icon}
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 }}>
+                      ✨ 你现在能换
+                    </div>
+                    <div style={{ fontSize: 20, color: tier.color, fontWeight: 700, marginBottom: 4 }}>
+                      {tier.icon} {top.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
+                      还剩 <span style={{ color: tier.color, fontWeight: 700 }}>{points - top.pointsRequired} 分</span>
+                      {affordable.length > 1 && <> · 还能选 {affordable.length - 1} 件</>}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* B. 搜索 + 分类 + 排序 */}
+            <div style={{ marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  value={mallSearch}
+                  onChange={(e) => setMallSearch(e.target.value)}
+                  placeholder="🔍 搜索商品名 / 规格"
+                  style={{
+                    width: '100%', padding: '10px 14px', paddingLeft: 36,
+                    borderRadius: '12px', fontSize: 13,
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(184, 134, 11, 0.15)',
+                    color: '#fff', outline: 'none', fontFamily: 'inherit',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, opacity: 0.6 }}>🔍</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+                {(['全部', '入门档', '进阶段', '豪华档', '尊享档'] as const).map(cat => (
+                  <button key={cat} onClick={() => setMallCategory(cat)} style={{
+                    padding: '10px 20px', borderRadius: 20, fontSize: 14, fontWeight: 600,
+                    whiteSpace: 'nowrap', cursor: 'pointer', flexShrink: 0,
+                    background: mallCategory === cat ? 'rgba(184, 134, 11, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                    border: `1px solid ${mallCategory === cat ? 'rgba(184, 134, 11, 0.5)' : 'rgba(255, 255, 255, 0.1)'}`,
+                    color: mallCategory === cat ? '#b8860b' : 'rgba(255, 255, 255, 0.7)',
+                  }}>
+                    {cat === '入门档' && '🌱'}
+                    {cat === '进阶段' && '🌿'}
+                    {cat === '豪华档' && '💎'}
+                    {cat === '尊享档' && '👑'}
+                    {' '}{cat}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+                <span>共 <strong style={{ color: '#b8860b' }}>{redeemItems.length}</strong> 件商品</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span>排序</span>
+                  {([
+                    { k: 'points' as const, l: '积分低→高' },
+                    { k: 'price' as const, l: '原价低→高' },
+                    { k: 'newest' as const, l: '最新上架' },
+                  ]).map(s => (
+                    <button key={s.k} onClick={() => setMallSortBy(s.k)} style={{
+                      padding: '3px 8px', borderRadius: 10, fontSize: 11,
+                      background: mallSortBy === s.k ? 'rgba(184, 134, 11, 0.2)' : 'transparent',
+                      color: mallSortBy === s.k ? '#b8860b' : 'rgba(255, 255, 255, 0.5)',
+                      border: 'none', cursor: 'pointer',
+                    }}>
+                      {s.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* C. 商品列表（过滤 + 排序 + 价格分层） */}
+            {redeemItems.length === 0 ? (
+              <div style={{
+                padding: '60px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.4)',
+                background: 'rgba(255,255,255,0.04)', borderRadius: '16px',
+              }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🎁</div>
+                <div style={{ fontSize: 14, marginBottom: 6 }}>暂无积分兑换商品</div>
+                <div style={{ fontSize: 11 }}>商家正在配置中，敬请期待</div>
+              </div>
+            ) : (() => {
+              let filtered = redeemItems.filter(p => {
+                if (mallCategory !== '全部') {
+                  const t = getPriceTier(p.pointsRequired)
+                  const catMap: Record<string, PriceTier> = { '入门档': 'entry', '进阶段': 'mid', '豪华档': 'premium', '尊享档': 'luxury' }
+                  if (t !== catMap[mallCategory]) return false
+                }
+                if (mallSearch.trim()) {
+                  const q = mallSearch.trim().toLowerCase()
+                  return p.name.toLowerCase().includes(q) || (p.spec || '').toLowerCase().includes(q)
+                }
+                return true
+              })
+              filtered = [...filtered].sort((a, b) => {
+                if (mallSortBy === 'points') return a.pointsRequired - b.pointsRequired
+                if (mallSortBy === 'price') return a.originalPrice - b.originalPrice
+                return 0
+              })
+
+              if (filtered.length === 0) {
+                return (
+                  <div style={{
+                    padding: '40px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.4)',
+                    background: 'rgba(255,255,255,0.04)', borderRadius: '16px',
+                  }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                    <div style={{ fontSize: 13 }}>没有匹配的商品</div>
+                    <div style={{ fontSize: 11, marginTop: 4 }}>换个关键词或分类试试</div>
+                  </div>
+                )
+              }
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  {filtered.map((p) => {
+                    const enough = points >= p.pointsRequired
+                    const tier = TIER_META[getPriceTier(p.pointsRequired)]
+                    const icon = getProductEmoji(p.name, p.category)
+                    const lowStock = p.stock > 0 && p.stock <= 3
+                    const outOfStock = p.stock <= 0
+                    return (
+                      <div key={p.id} onClick={() => setSelectedProduct(p)} style={{
+                        padding: '12px', borderRadius: '16px', cursor: 'pointer',
+                        background: `linear-gradient(160deg, ${tier.color}10 0%, rgba(0,0,0,0.15) 100%)`,
+                        border: `1px solid ${enough && !outOfStock ? tier.color + '33' : 'rgba(255,255,255,0.08)'}`,
+                        opacity: outOfStock ? 0.5 : 1, position: 'relative', overflow: 'hidden',
+                      }}
+                      onMouseDown={(e) => (e.currentTarget as HTMLElement).style.transform = 'scale(0.97)'}
+                      onMouseUp={(e) => (e.currentTarget as HTMLElement).style.transform = 'scale(1)'}
+                      onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.transform = 'scale(1)'}
+                      >
+                        <div style={{ position: 'absolute', top: 6, left: 6, display: 'flex', gap: 4 }}>
+                          <span style={{
+                            fontSize: 9, padding: '2px 6px', borderRadius: 8,
+                            background: tier.color + '30', color: tier.color, fontWeight: 700,
+                          }}>{tier.icon} {tier.label.replace('档', '')}</span>
+                          {lowStock && (
+                            <span style={{
+                              fontSize: 9, padding: '2px 6px', borderRadius: 8,
+                              background: 'rgba(255,107,107,0.25)', color: '#ff6b6b', fontWeight: 700,
+                            }}>🔥 紧张</span>
+                          )}
+                        </div>
+                        <div style={{
+                          width: '100%', aspectRatio: '1/1',
+                          background: `radial-gradient(circle, ${tier.color}20 0%, transparent 70%)`,
+                          borderRadius: '12px', marginTop: 12, marginBottom: '6px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 52, lineHeight: 1, overflow: 'hidden',
+                        }}>
+                          {p.image ? (
+                            <img src={p.image} alt={p.name} style={{
+                              width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px',
+                            }} />
+                          ) : (
+                            <span>{icon}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.spec && `${p.spec} · `}
+                          原价 ¥{p.originalPrice.toFixed(2)} · 库存 {p.stock}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: enough ? tier.color : '#666' }}>
+                              {p.pointsRequired} <span style={{ fontSize: 10, fontWeight: 500 }}>分</span>
+                            </div>
+                            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginTop: -2 }}>
+                              ≈ ¥{(p.pointsRequired / 50).toFixed(2)}
+                            </div>
+                          </div>
+                          <button
+                            disabled={!enough || outOfStock || redeeming === p.id}
+                            onClick={(e) => { e.stopPropagation(); handleRedeem(p) }}
+                            style={{
+                              padding: '5px 10px', borderRadius: '10px', border: 'none',
+                              background: enough && !outOfStock ? tier.color + '30' : 'rgba(255,255,255,0.06)',
+                              color: enough && !outOfStock ? tier.color : '#666',
+                              fontSize: 10, fontWeight: 700,
+                              cursor: (enough && !outOfStock) ? 'pointer' : 'not-allowed',
+                            }}
+                          >
+                            {outOfStock ? '售罄' : redeeming === p.id ? '处理中' : enough ? '兑换' : '积分不够'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </>
+        )}
+
+        {/* ⭐ 商品详情弹窗 — 奕霖 2026-09-06 22:37 升级: mobile-friendly + 顶部 ✕ 返回键 + body 滚动锁 */}
+        {selectedProduct && (
+          <div onClick={() => setSelectedProduct(null)} style={{
+            position: 'fixed', inset: 0, zIndex: 99999,
+            background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            animation: 'fadeIn 0.2s ease', padding: '16px',
+          }}>
+            <div onClick={(e) => e.stopPropagation()} style={{
+              position: 'relative',
+              width: 'calc(100% - 32px)', maxWidth: 360,
+              maxHeight: 'calc(100vh - 100px - env(safe-area-inset-bottom, 0px))',
+              background: 'linear-gradient(180deg, #0f1f17 0%, #0a0f0d 100%)',
+              borderRadius: '20px', padding: '20px',
+              border: '1px solid rgba(184, 134, 11, 0.3)',
+              overflow: 'auto', animation: 'slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              overscrollBehavior: 'contain',
+            }}>
+              {/* 顶部 ✕ 返回键 */}
+              <button
+                onClick={() => setSelectedProduct(null)}
+                aria-label="关闭"
+                style={{
+                  position: 'absolute', top: 12, right: 12,
+                  width: 32, height: 32, borderRadius: '50%',
+                  border: 'none', background: 'rgba(255,255,255,0.1)',
+                  color: '#fff', fontSize: 18, lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', zIndex: 2,
+                }}
+              >✕</button>
+              {(() => {
+                const p = selectedProduct
+                const tier = TIER_META[getPriceTier(p.pointsRequired)]
+                const icon = getProductEmoji(p.name, p.category)
+                const enough = points >= p.pointsRequired
+                return (
+                  <>
+                    <div style={{ width: 40, height: 4, background: 'rgba(255,255,255,0.2)', borderRadius: 2, margin: '0 auto 16px' }} />
+                    <div style={{
+                      width: '100%', aspectRatio: '1/1', maxHeight: 240,
+                      background: `radial-gradient(circle, ${tier.color}40 0%, transparent 70%)`,
+                      borderRadius: '20px', marginBottom: '16px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 110, lineHeight: 1, overflow: 'hidden',
+                    }}>
+                      {p.image ? (
+                        <img src={p.image} alt={p.name} style={{
+                          width: '100%', height: '100%', objectFit: 'cover', borderRadius: '20px',
+                        }} />
+                      ) : (
+                        <span>{icon}</span>
+                      )}
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                        <span style={{
+                          fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                          background: tier.color + '30', color: tier.color, fontWeight: 700,
+                        }}>{tier.icon} {tier.label}</span>
+                        {p.stock <= 3 && p.stock > 0 && (
+                          <span style={{
+                            fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                            background: 'rgba(255,107,107,0.25)', color: '#ff6b6b', fontWeight: 700,
+                          }}>🔥 仅剩 {p.stock} 件</span>
+                        )}
+                        {p.stock <= 0 && (
+                          <span style={{
+                            fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                            background: 'rgba(255,255,255,0.1)', color: '#999', fontWeight: 700,
+                          }}>已售罄</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{p.name}</div>
+                      {p.spec && (
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>规格：{p.spec}</div>
+                      )}
+                    </div>
+                    <div style={{
+                      padding: '16px', borderRadius: '14px',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      marginBottom: 16,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>原价</span>
+                        <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', textDecoration: 'line-through' }}>
+                          ¥{p.originalPrice.toFixed(2)}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>兑换需要</span>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: tier.color }}>
+                          {p.pointsRequired} 积分
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>≈ 现金价值</span>
+                        <span style={{ fontSize: 14, color: '#fff', fontWeight: 600 }}>
+                          ¥{(p.pointsRequired / 50).toFixed(2)}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,0.1)' }}>
+                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>库存</span>
+                        <span style={{ fontSize: 14, color: p.stock > 0 ? '#b8860b' : '#ff6b6b', fontWeight: 600 }}>
+                          {p.stock > 0 ? `${p.stock} 件` : '已售罄'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      disabled={!enough || p.stock <= 0 || redeeming === p.id}
+                      onClick={() => handleRedeem(p)}
+                      style={{
+                        width: '100%', padding: '16px', borderRadius: '14px', border: 'none',
+                        background: enough && p.stock > 0
+                          ? `linear-gradient(135deg, ${tier.color} 0%, ${tier.color}aa 100%)`
+                          : 'rgba(255,255,255,0.06)',
+                        color: enough && p.stock > 0 ? '#0a0f0d' : '#666',
+                        fontSize: 15, fontWeight: 700,
+                        cursor: (enough && p.stock > 0) ? 'pointer' : 'not-allowed',
+                        marginBottom: 12,
+                      }}
+                    >
+                      {redeeming === p.id ? '处理中...' :
+                       p.stock <= 0 ? '已售罄' :
+                       !enough ? `积分不够（还差 ${p.pointsRequired - points} 分）` :
+                       `立即兑换 ${p.pointsRequired} 积分`}
+                    </button>
+                    <div style={{
+                      padding: '12px', borderRadius: '10px',
+                      background: 'rgba(184, 134, 11, 0.05)',
+                      border: '1px dashed rgba(184, 134, 11, 0.2)',
+                      fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6,
+                    }}>
+                      💡 提交后将创建兑换订单 (status=pending)<br />
+                      📞 到店凭订单号让店员核销,核销后扣积分
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* 明细内容（2026-08-02 奕霖：接真数据 from /api/me/points-history） */}
+        {tab === 'history' && (
+          <HistoryTab token={useUserStore.getState().token} />
+        )}
+
+        {/* 一劳永逸机制说明（小尾巴） */}
+        {data?.isDemo && (
+          <div style={{
+            marginTop: '20px', padding: '12px 16px',
+            borderRadius: '12px',
+            background: 'rgba(184, 134, 11, 0.05)',
+            border: '1px dashed rgba(184, 134, 11, 0.3)',
+            fontSize: '11px', color: 'rgba(255,255,255,0.5)',
+            lineHeight: 1.6,
+          }}>
+            💡 现在您看到的是演示账户 13800138000 的真实积分数据<br />
+            下单消费后自动累加积分、自动升级会员等级、自动写入积分流水
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  )
+}
+
+
+// ⭐ 2026-09-06 奕霖升级（果蔬店化）：商品关键词 → emoji 图标（无图时的兜底）
+const PRODUCT_ICON_BY_KEYWORD: Array<[RegExp, string]> = [
+  // 水果
+  [/草莓|车厘子|樱桃|蓝莓|蔓越莓/, '🍓'],
+  [/苹果|梨|青苹果/, '🍎'],
+  [/香蕉|芭蕉/, '🍌'],
+  [/橙子|橘子|柑|柚|柠檬/, '🍊'],
+  [/葡萄|提子/, '🍇'],
+  [/西瓜|哈密瓜|香瓜|甜瓜/, '🍉'],
+  [/桃子|水蜜桃|毛桃/, '🍑'],
+  [/芒果|木瓜/, '🥭'],
+  [/菠萝|凤梨/, '🍍'],
+  [/猕猴桃|奇异果/, '🥝'],
+  [/椰子/, '🥥'],
+  [/石榴/, '🍎'],
+  [/柿子/, '🍅'],
+  // 蔬菜
+  [/番茄|西红柿|圣女果/, '🍅'],
+  [/黄瓜|水果黄瓜/, '🥒'],
+  [/茄子|紫茄/, '🍆'],
+  [/玉米|糯玉米|甜玉米/, '🌽'],
+  [/土豆|马铃薯|薯/, '🥔'],
+  [/红薯|地瓜|紫薯/, '🍠'],
+  [/辣椒|青椒|彩椒|小米椒/, '🌶️'],
+  [/南瓜|贝贝南瓜/, '🎃'],
+  [/西兰花|花菜|菜花|白花菜/, '🥦'],
+  [/白菜|青菜|小白菜|娃娃菜/, '🥬'],
+  [/菠菜|油麦菜|生菜|莴笋/, '🥬'],
+  [/胡萝卜|萝卜|白萝卜/, '🥕'],
+  [/大蒜|蒜/, '🧄'],
+  [/生姜|姜/, '🫚'],
+  [/蘑菇|香菇|平菇|金针菇|杏鲍菇/, '🍄'],
+  [/豆角|四季豆|豇豆/, '🫛'],
+  // 肉禽蛋
+  [/鸡|鸭|鹅|鸽子|鹌鹑|蛋|鸡蛋|鸭蛋/, '🥚'],
+  [/牛肉|牛排|肥牛|牛腩/, '🥩'],
+  [/猪肉|五花|排骨|里脊/, '🥓'],
+  [/鱼|草鱼|鲈鱼|三文鱼|鳕鱼/, '🐟'],
+  [/虾|基围虾|白虾|明虾|大虾/, '🦐'],
+  [/蟹|螃蟹|大闸蟹/, '🦀'],
+  [/牛奶|酸奶|奶酪|黄油/, '🥛'],
+]
+
+function getProductEmoji(name: string, category?: string | null): string {
+  for (const [regex, icon] of PRODUCT_ICON_BY_KEYWORD) {
+    if (regex.test(name)) return icon
+  }
+  // GB/T 4754 果蔬大类：0701=水果 0702=蔬菜 0703=肉禽蛋水 0704=水产
+  if (category === '0701') return '🍎'
+  if (category === '0702') return '🥬'
+  if (category === '0703') return '🥚'
+  if (category === '0704') return '🐟'
+  return '🍓'
+}
+
+// ⭐ 价格档位（奕霖 4 档分层）
+type PriceTier = 'entry' | 'mid' | 'premium' | 'luxury'
+const TIER_META: Record<PriceTier, { label: string; icon: string; color: string; range: string }> = {
+  entry:   { label: '入门档', icon: '🌱', color: '#b8860b', range: '500-1000 积分' },
+  mid:     { label: '进阶段', icon: '🌿', color: '#2dd4bf', range: '1500-3000 积分' },
+  premium: { label: '豪华档', icon: '💎', color: '#a78bfa', range: '5000-8000 积分' },
+  luxury:  { label: '尊享档', icon: '👑', color: '#b8860b', range: '10000+ 积分' },
+}
+function getPriceTier(points: number): PriceTier {
+  if (points <= 1000) return 'entry'
+  if (points <= 3000) return 'mid'
+  if (points <= 8000) return 'premium'
+  return 'luxury'
+}
+
+// ⭐ 商品"划算度"= 原价 / 兑换积分（数值越小越划算）
+function getValueRatio(p: RedeemProduct): number {
+  if (p.originalPrice <= 0) return 999
+  return p.originalPrice / (p.pointsRequired / 50)  // 50 分 = ¥1
+}
+
+
+// ============== 积分明细组件（2026-08-02 接 /api/me/points-history） ==============
+
+interface PointsHistoryItem {
+  id: string
+  type: string
+  delta: number
+  balance: number
+  description: string
+  expiresAt: string | null
+  createdAt: string
+}
+
+const TYPE_META: Record<string, { icon: string; label: string; color: string }> = {
+  earn: { icon: '🎁', label: '消费赠送', color: '#b8860b' },
+  spend: { icon: '💸', label: '兑换消耗', color: '#ff9a6b' },
+  expire: { icon: '⏰', label: '过期清零', color: '#ff6b6b' },
+  adjust: { icon: '⚙️', label: '调整', color: '#888' },
+}
+
+function HistoryTab({ token }: { token: string | null }) {
+  const [items, setItems] = useState<PointsHistoryItem[]>([])
+  const [summary, setSummary] = useState<{ earned: number; spent: number; expired: number; expireSoon: number; currentBalance: number } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [filterType, setFilterType] = useState<string>('')
+
+  async function load() {
+    if (!token) {
+      setError('请先登录')
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const url = filterType ? `/api/me/points-history?type=${filterType}&limit=50` : `/api/me/points-history?limit=50`
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      const json = await res.json()
+      if (json.success) {
+        setItems(json.items || [])
+        setSummary(json.summary || null)
+      } else {
+        setError(json.error || '加载失败')
+      }
+    } catch (e: any) {
+      setError('网络错误：' + (e?.message || ''))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [filterType])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 汇总卡片 */}
+      {summary && (
+        <div style={{
+          padding: '14px 16px',
+          borderRadius: '14px',
+          background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.12), rgba(45, 90, 61, 0.25))',
+          border: '1px solid rgba(184, 134, 11, 0.25)',
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr 1fr',
+          gap: 8,
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>累计获得</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#b8860b', marginTop: 2 }}>
+              +{summary.earned.toLocaleString()}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>累计消耗</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#ff9a6b', marginTop: 2 }}>
+              -{summary.spent.toLocaleString()}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>即将过期</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: summary.expireSoon > 0 ? '#ffd700' : 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+              {summary.expireSoon > 0 ? `⚠️ ${summary.expireSoon}` : summary.expired.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 过滤 */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {[{ k: '', l: '全部' }, { k: 'earn', l: '🎁 获得' }, { k: 'spend', l: '💸 消耗' }, { k: 'expire', l: '⏰ 过期' }].map(t => (
+          <button key={t.k} onClick={() => setFilterType(t.k)} style={{
+            padding: '10px 18px', borderRadius: 18,
+            background: filterType === t.k ? 'rgba(184, 134, 11, 0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${filterType === t.k ? 'rgba(184, 134, 11, 0.4)' : 'rgba(255,255,255,0.08)'}`,
+            color: filterType === t.k ? '#b8860b' : 'rgba(255,255,255,0.6)',
+            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+          }}>{t.l}</button>
+        ))}
+      </div>
+
+      {/* 列表 */}
+      {loading ? (
+        <div style={{ padding: '40px', textAlign: 'center', color: 'rgba(255,255,255,0.4)' }}>加载中…</div>
+      ) : error ? (
+        <div style={{ padding: '40px', textAlign: 'center', color: '#ff6b6b' }}>{error}</div>
+      ) : items.length === 0 ? (
+        <div style={{
+          padding: '60px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.4)',
+          background: 'rgba(255,255,255,0.04)', borderRadius: 16,
+        }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+          <div style={{ fontSize: 14, marginBottom: 6 }}>暂无积分流水</div>
+          <div style={{ fontSize: 11 }}>下单后会记录赠送和消耗</div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {items.map(it => {
+            const meta = TYPE_META[it.type] || TYPE_META.adjust
+            const isPositive = it.delta > 0
+            return (
+              <div key={it.id} style={{
+                padding: '12px 14px',
+                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(184, 134, 11, 0.08)',
+                display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <div style={{ fontSize: 22, flexShrink: 0 }}>{meta.icon}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: '#fff', fontWeight: 600, marginBottom: 2 }}>
+                    {it.description || meta.label}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+                    {new Date(it.createdAt).toLocaleString('zh-CN', { hour12: false })}
+                    {it.expiresAt && it.type === 'earn' && (
+                      <> · <span style={{ color: 'rgba(255,154,107,0.7)' }}>到期 {new Date(it.expiresAt).toLocaleDateString('zh-CN')}</span></>
+                    )}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: meta.color }}>
+                    {isPositive ? '+' : ''}{it.delta}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>余 {it.balance}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

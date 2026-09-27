@@ -1,0 +1,87 @@
+self.skipWaiting();
+self.clients.claim();
+/**
+ * 造型师助手（铜仁市碧江区店） Service Worker
+ * ⭐ 2026-09-22 14:23 段118：清理芝林大药房残留缓存，重置为 barber-v1.0.0
+ * 策略：network-first 走 API，cache-first 走静态资源
+ */
+
+const CACHE_NAME = 'barber-v1.0.0';        // ⭐ 段118：reset cache name（旧药房版缓存已失效）
+const STATIC_CACHE = 'barber-cache-v1.0.0'; // ⭐ 段118：reset static cache
+const RUNTIME_CACHE = 'barber-cache-v1.0.0';// ⭐ 段118：reset runtime cache
+
+// 预缓存关键资源
+const PRECACHE_URLS = [
+  '/',
+  '/merchant',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+  '/merchant-logo.jpg',
+  '/favicon.png',
+];
+
+// 安装
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      // 清理所有旧版缓存（药房版 + 旧版 barber）
+      return Promise.all(
+        cacheNames
+          .filter((name) => name !== STATIC_CACHE && name !== RUNTIME_CACHE)
+          .map((name) => caches.delete(name))
+      );
+    }).then(() => {
+      return caches.open(STATIC_CACHE);
+    }).then((cache) => {
+      return cache.addAll(PRECACHE_URLS).catch((err) => {
+        console.warn('[SW] precache failed:', err);
+      });
+    })
+  );
+});
+
+// 激活
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames
+          .filter((name) => name !== STATIC_CACHE && name !== RUNTIME_CACHE)
+          .map((name) => caches.delete(name))
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+// fetch：network-first 走 API，cache-first 走静态资源
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+
+  // API 请求：network-first
+  if (request.url.includes('/api/') || request.method !== 'GET') {
+    event.respondWith(
+      fetch(request).catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // 静态资源：cache-first
+  event.respondWith(cacheFirst(request));
+});
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(RUNTIME_CACHE);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (err) {
+    return cached || Response.error();
+  }
+}

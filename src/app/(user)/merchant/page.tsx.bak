@@ -1,0 +1,2400 @@
+'use client'
+
+import { toast } from '@/lib/ui-bus'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import AppLayout from '@/components/AppLayout'
+import WechatHint from '@/components/WechatHint'
+import { BUSINESS_CONFIG } from '@/config/business.config'
+import MapLauncher from '@/components/MapLauncher'
+import { PinSetupModal } from '@/components/PinSetupModal'
+import { PinUnlockModal } from '@/components/PinUnlockModal'
+import {
+  hasPin, getRemindState, dismissRemind, isLockExpired,
+  isInGracePeriod, getGraceRemainingMs,
+  setLastAuthTime, clearPin,
+} from '@/lib/manager-auth'
+
+// 与 /community 一致的 UI 风格
+// ⭐ 2026-09-20 01:42 奕霖拍板：全局改暖米深棕沙龙配色（76+46 处引用）
+const PRIMARY = '#b8860b'
+const PRIMARY_RGBA = '184, 134, 11'
+const GOLD = PRIMARY                 // 别名兼容：76 处引用
+const GOLD_RGBA = PRIMARY_RGBA       // 别名兼容：46 处引用
+const GREEN_RGBA = PRIMARY_RGBA      // 历史别名兼容
+const GREEN = PRIMARY                // 历史别名兼容
+const CARD_BG = 'linear-gradient(180deg, #faf6f0 0%, #fffaf0 100%)'
+
+export default function MerchantDisplayPage() {
+  const router = useRouter()
+  const [bookingOpen, setBookingOpen] = useState(false)
+  // ⭐ 奕霖 2026-08-13 20:07：底部内联二维码小样图 + 点击放大
+        const [bookingForm, setBookingForm] = useState({
+    name: '',
+    phone: '',
+    service: '鲜蔬搭配',
+    date: '',
+    time: '',
+    note: '',
+  })
+  const [bookingResult, setBookingResult] = useState<{
+    orderNo: string
+    pointsAdded: number
+    totalPoints: number
+  } | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+
+  // ⭐ 2026-07-13 14:18 奕霖需求：首页品牌故事接真实数据
+  const [merchantStats, setMerchantStats] = useState<{
+    productCount: number
+    inStockCount: number
+    memberCount: number
+    orderCount: number
+    deliveredCount: number
+    reviewCount: number
+    avgRating: number
+  } | null>(null)
+  useEffect(() => {
+    fetch('/api/merchant/stats')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) setMerchantStats(d.data.stats)
+      })
+      .catch(() => { /* 静默失败，以静态占位为准 */ })
+  }, [])
+  const [memberData, setMemberData] = useState<any>(null)
+  const [memberLoading, setMemberLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [memberOpen, setMemberOpen] = useState(false)
+  const [memberPhone, setMemberPhone] = useState('')
+
+  const services = [
+    { name: '新鲜水果', icon: '🍎', desc: '当季时令·产地直采' },
+    { name: '有机蔬菜', icon: '🥬', desc: '本地农场·当日配送' },
+    { name: '营养搭配', icon: '🥗', desc: '果小蔬 24h 推荐' },
+    { name: '品质检测', icon: '🔬', desc: '农残检测·溯源报告' },
+    { name: '鲜送上门', icon: '🚚', desc: '3 公里内 1 小时达' },
+    { name: '套餐定制', icon: '📦', desc: '一周鲜蔬·周配到家' },
+  ]
+
+  const handleBooking = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      // 真存到数据库（通过 /api/orders），自动触发会员升级
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          merchantCode: 'G0001', // 果蔬鲜生
+          customerName: bookingForm.name,
+          phone: bookingForm.phone,
+          items: [
+            {
+              name: `服务预约 - ${bookingForm.service}`,
+              price: 1, // 服务预约象征性收 1 元
+              quantity: 1,
+            },
+          ],
+          deliveryType: 'pickup', // 到店
+          remark: `预约时间：${bookingForm.date} ${bookingForm.time}${bookingForm.note ? ' | 备注：' + bookingForm.note : ''}`,
+          simulateComplete: true, // 演示模式：直接完成 + 算积分
+        }),
+      })
+      const data = await res.json()
+      if (!data.success) {
+        toast.error('预约失败：' + (data.error || '未知错误'))
+        setSubmitting(false)
+        return
+      }
+      // 显示订单号 + 积分
+      setBookingResult({
+        orderNo: data.order.orderNo,
+        pointsAdded: data.membership?.pointsAdded ?? 0,
+        totalPoints: data.membership?.newPointsBalance ?? 0,
+      })
+      setSubmitted(true)
+      // 5 秒后关闭弹窗（多留点时间看积分）
+      setTimeout(() => {
+        setBookingOpen(false)
+        setSubmitted(false)
+        setBookingResult(null)
+        setBookingForm({ name: '', phone: '', service: '鲜蔬搭配', date: '', time: '', note: '' })
+      }, 5000)
+    } catch (e: any) {
+      toast.error('网络错误：' + (e?.message ?? 'unknown'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // 会员查询（顾客输入手机号查自己的会员信息）
+  const handleMemberLookup = async () => {
+    if (!/^1[3-9]\d{9}$/.test(memberPhone)) {
+      toast.info('请输入正确的手机号')
+      return
+    }
+    setMemberLoading(true)
+    try {
+      const res = await fetch(`/api/customer/lookup?merchantCode=G0001&phone=${memberPhone}`)
+      const data = await res.json()
+      if (!data.success) {
+        toast.error('查询失败：' + (data.error || '未知错误'))
+        return
+      }
+      setMemberData(data)
+    } catch (e: any) {
+      toast.error('网络错误：' + (e?.message ?? 'unknown'))
+    } finally {
+      setMemberLoading(false)
+    }
+  }
+
+  const brandStory = BUSINESS_CONFIG.brandStory
+  const displayParagraphs = expanded
+    ? brandStory.paragraphs
+    : brandStory.paragraphs.slice(0, 2)
+
+  return (
+    <AppLayout title={BUSINESS_CONFIG.name}>
+      {/* ============ Logo + 名称区 ============ */}
+      <div style={{
+        background: CARD_BG,
+        borderRadius: '18px',
+        padding: '24px 20px',
+        marginBottom: '16px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+        border: `1px solid rgba(${GREEN_RGBA}, 0.1)`,
+        backdropFilter: 'blur(20px)',
+        textAlign: 'center',
+      }}>
+        <div style={{
+          width: 72, height: 72, margin: '0 auto 14px',
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.2), rgba(${GREEN_RGBA}, 0.05))`,
+          borderRadius: 18, padding: 4,
+          boxShadow: `0 4px 20px rgba(${GREEN_RGBA}, 0.2)`,
+        }}>
+          <img src={BUSINESS_CONFIG.assets.logo} alt={BUSINESS_CONFIG.name} style={{
+            width: '100%', height: '100%', borderRadius: 14, objectFit: 'cover',
+          }} />
+        </div>
+
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#2c1810', marginBottom: 6 }}>
+          {BUSINESS_CONFIG.name}
+        </h1>
+        <p style={{
+          fontSize: 13, color: GREEN, fontStyle: 'italic', marginBottom: 10,
+        }}>—— 近一点，再近一点 ——</p>
+        <p style={{
+          display: 'inline-block',
+          padding: '4px 12px',
+          background: `rgba(${GREEN_RGBA}, 0.1)`,
+          border: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+          borderRadius: 100,
+          fontSize: 12, color: GREEN, fontWeight: 600,
+        }}>
+          🟢 营业中 · {BUSINESS_CONFIG.contact.hours}
+        </p>
+        {/* 我的会员入口 */}
+        <div
+          onClick={() => setMemberOpen(true)}
+          style={{
+            display: 'inline-block',
+            marginTop: 10,
+            padding: '6px 14px',
+            background: 'rgba(127, 220, 148, 0.05)',
+            border: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+            borderRadius: 100,
+            fontSize: 12, color: GREEN, fontWeight: 500,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          🎫 我的会员 / 查积分
+        </div>
+      </div>
+
+      {/* ============ 快捷操作 ============ */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '8px',
+        marginBottom: '16px',
+      }}>
+        <a href={`tel:${BUSINESS_CONFIG.contact.phone}`} style={{
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.2), rgba(${GREEN_RGBA}, 0.05))`,
+          border: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+          padding: '14px 8px', borderRadius: '14px',
+          textAlign: 'center', textDecoration: 'none',
+          fontSize: 12, fontWeight: 600, color: GREEN,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        }}>
+          <span style={{ fontSize: 22 }}>📞</span>
+          致电商家
+        </a>
+        <button onClick={() => router.push('/merchant/queue')} style={{
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.2), rgba(${GREEN_RGBA}, 0.05))`,
+          border: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+          padding: '14px 8px', borderRadius: '14px',
+          textAlign: 'center', cursor: 'pointer',
+          fontSize: 12, fontWeight: 600, color: GREEN,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+          fontFamily: 'inherit',
+        }}>
+          <span style={{ fontSize: 22 }}>🚶</span>
+          实时排队
+        </button>
+        <a href="/map" style={{
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.2), rgba(${GREEN_RGBA}, 0.05))`,
+          border: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+          padding: '14px 8px', borderRadius: '14px',
+          textAlign: 'center', textDecoration: 'none',
+          fontSize: 12, fontWeight: 600, color: GREEN,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        }}>
+          <span style={{ fontSize: 22 }}>📍</span>
+          导航到店
+        </a>
+      </div>
+
+      {/* ============ AI 找药入口（2026-07-02 清禾：从精选商品改为 AI 找药）============ */}
+      <button
+        onClick={() => router.push('/ai-find-drug')}
+        style={{
+          width: '100%',
+          padding: '20px',
+          marginBottom: '16px',
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.25) 0%, rgba(${GREEN_RGBA}, 0.08) 100%)`,
+          border: `1.5px solid rgba(${GREEN_RGBA}, 0.4)`,
+          borderRadius: '18px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          cursor: 'pointer',
+          textAlign: 'left',
+          boxShadow: '0 8px 32px rgba(127, 220, 148, 0.2)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        {/* 背景 halo */}
+        <div style={{
+          position: 'absolute',
+          right: -30, top: -30,
+          width: 120, height: 120,
+          background: `radial-gradient(circle, rgba(${GREEN_RGBA}, 0.2) 0%, transparent 70%)`,
+          pointerEvents: 'none',
+        }} />
+        <div style={{
+          fontSize: '40px',
+          width: 56, height: 56,
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.3), rgba(${GREEN_RGBA}, 0.1))`,
+          borderRadius: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>🤖</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: '17px', fontWeight: 700, color: '#2c1810' }}>AI 挑果</span>
+            <span style={{
+              padding: '2px 8px',
+              background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.3), rgba(${GREEN_RGBA}, 0.15))`,
+              color: GREEN,
+              fontSize: 10, fontWeight: 700,
+              borderRadius: 6,
+              letterSpacing: '0.5px',
+            }}>新</span>
+          </div>
+          <div style={{ fontSize: '12px', color: `rgba(${GREEN_RGBA}, 0.75)`, lineHeight: 1.5 }}>
+            说想吃什么水果，AI 帮你挑 · 数百款鲜果
+          </div>
+        </div>
+        <div style={{ fontSize: '24px', color: GREEN, opacity: 0.8 }}>›</div>
+      </button>
+
+      {/* ⭐ 奕霖 2026-07-07 13:30：店员核销中心从首页移除（用户看不见这个功能） */}
+      {/* 店员入口已迁移到「我的」Tab → 底部「我是店员」折叠区 */}
+
+      {/* ============ 品牌故事 ============ */}
+      <div style={{
+        background: CARD_BG,
+        borderRadius: '18px',
+        padding: '22px',
+        marginBottom: '16px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+        border: `1px solid rgba(${GREEN_RGBA}, 0.1)`,
+        backdropFilter: 'blur(20px)',
+      }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '4px 12px',
+          background: `rgba(${GREEN_RGBA}, 0.1)`,
+          border: `1px solid rgba(${GREEN_RGBA}, 0.2)`,
+          borderRadius: 100, marginBottom: 14,
+        }}>
+          <span style={{ fontSize: 12, color: GREEN, fontWeight: 600 }}>📖 品牌故事</span>
+        </div>
+
+        <img
+          src="/grocery-assets/brand-fresh.jpg"
+          alt="果蔬鲜生新鲜食材"
+          style={{
+            width: '100%',
+            borderRadius: '12px',
+            marginBottom: '14px',
+            objectFit: 'cover',
+            maxHeight: '240px',
+          }}
+        />
+
+        <h2 style={{
+          fontSize: 20, fontWeight: 700, color: '#2c1810',
+          marginBottom: 6, lineHeight: 1.3,
+        }}>{brandStory.title}</h2>
+        <p style={{
+          fontSize: 13, color: GREEN, fontStyle: 'italic',
+          marginBottom: 14,
+        }}>—— {brandStory.subtitle}</p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {displayParagraphs.map((para, i) => (
+            <p key={i} style={{
+              fontSize: 14, color: 'rgba(44, 24, 16,0.78)',
+              lineHeight: 1.85, textIndent: '2em', margin: 0,
+            }}>{para}</p>
+          ))}
+        </div>
+
+        {brandStory.paragraphs.length > 2 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              marginTop: 10, padding: '6px 14px',
+              background: `rgba(${GREEN_RGBA}, 0.08)`,
+              border: `1px solid rgba(${GREEN_RGBA}, 0.2)`,
+              borderRadius: 100,
+              fontSize: 12, color: GREEN, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >{expanded ? '收起 ↑' : `展开 ↓ 还有 ${brandStory.paragraphs.length - 2} 段`}</button>
+        )}
+
+        {/* 亮点标签 */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16 }}>
+          {brandStory.highlights.map((h, i) => (
+            <span key={i} style={{
+              padding: '4px 10px',
+              background: `rgba(${GREEN_RGBA}, 0.08)`,
+              border: `1px solid rgba(${GREEN_RGBA}, 0.18)`,
+              borderRadius: 100,
+              fontSize: 12, color: 'rgba(44, 24, 16,0.85)',
+            }}>{h.icon} {h.label}</span>
+          ))}
+        </div>
+
+        {/* ⭐ 2026-07-13 14:18 奕霖需求：接真实数据 */}
+        {merchantStats && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
+            marginTop: 18,
+            padding: '14px 0',
+            borderTop: `1px solid rgba(${GREEN_RGBA}, 0.1)`,
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: GREEN }}>{merchantStats.productCount.toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.55)', marginTop: 2 }}>在售商品</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: GREEN }}>{merchantStats.memberCount}</div>
+              <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.55)', marginTop: 2 }}>服务会员</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: GREEN }}>{merchantStats.deliveredCount}</div>
+              <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.55)', marginTop: 2 }}>已完结订单</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: GREEN }}>
+                {merchantStats.avgRating > 0 ? merchantStats.avgRating.toFixed(1) : '—'}
+                <span style={{ fontSize: 13, opacity: 0.7 }}> ⭐</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.55)', marginTop: 2 }}>
+                {merchantStats.reviewCount > 0 ? `${merchantStats.reviewCount} 条评价` : '暂无评价'}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ============ 找药入口（2026-07-01 清禾新加）============ */}
+      <button
+        onClick={() => router.push('/products')}
+        style={{
+          width: '100%',
+          padding: '18px 20px',
+          marginBottom: '16px',
+          background: `linear-gradient(135deg, rgba(${GREEN_RGBA}, 0.2) 0%, rgba(${GREEN_RGBA}, 0.08) 100%)`,
+          border: `1px solid rgba(${GREEN_RGBA}, 0.35)`,
+          borderRadius: '18px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          cursor: 'pointer',
+          textAlign: 'left',
+          boxShadow: '0 8px 32px rgba(127, 220, 148, 0.15)',
+        }}
+      >
+        <div style={{ fontSize: '32px' }}>🔍</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '15px', fontWeight: 700, color: '#2c1810', marginBottom: '2px' }}>
+            立即挑果
+          </div>
+          <div style={{ fontSize: '11.5px', color: `rgba(${GREEN_RGBA}, 0.7)` }}>
+            数百款鲜果 · 9 大品类 · 产地溯源直发
+          </div>
+        </div>
+        <div style={{ fontSize: '20px', color: GREEN, opacity: 0.7 }}>›</div>
+      </button>
+
+      {/* ============ 服务项目 ============ */}
+      <div style={{
+        background: CARD_BG,
+        borderRadius: '18px',
+        padding: '22px',
+        marginBottom: '16px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+        border: `1px solid rgba(${GREEN_RGBA}, 0.1)`,
+        backdropFilter: 'blur(20px)',
+      }}>
+        <h2 style={{
+          fontSize: 16, fontWeight: 700, color: '#2c1810',
+          marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>💼</span> 服务项目
+        </h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+          {services.map((s, i) => (
+            <div key={i} style={{
+              padding: '14px 10px',
+              background: `rgba(${GREEN_RGBA}, 0.06)`,
+              border: `1px solid rgba(${GREEN_RGBA}, 0.12)`,
+              borderRadius: 14,
+              textAlign: 'center', cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = `rgba(${GREEN_RGBA}, 0.12)`
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = `rgba(${GREEN_RGBA}, 0.06)`
+              }}
+            >
+              <div style={{ fontSize: 24, marginBottom: 4 }}>{s.icon}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#2c1810', marginBottom: 2 }}>{s.name}</div>
+              <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.5)' }}>{s.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ============ 联系方式 ============ */}
+      <div style={{
+        background: CARD_BG,
+        borderRadius: '18px',
+        padding: '22px',
+        marginBottom: '16px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+        border: `1px solid rgba(${GREEN_RGBA}, 0.1)`,
+        backdropFilter: 'blur(20px)',
+      }}>
+        <h2 style={{
+          fontSize: 16, fontWeight: 700, color: '#2c1810',
+          marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>📍</span> 联系方式
+        </h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <InfoRow icon="🏠" label="门店地址" value={BUSINESS_CONFIG.contact.address} />
+          {/* ⭐ 2026-07-30 03:59 奕霖需求：地图选 app 导航（精确定位） */}
+          {(() => {
+            const c = BUSINESS_CONFIG.contact.coords
+            const lng = (c && c[0]) ?? 109.200269
+            const lat = (c && c[1]) ?? 27.732818
+            return (
+              <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: 4 }}>
+                <MapLauncher
+                  lat={lat}
+                  lng={lng}
+                  name={BUSINESS_CONFIG.name}
+                  address={BUSINESS_CONFIG.contact.address}
+                  label="导航到店"
+                  variant="ghost"
+                />
+              </div>
+            )
+          })()}
+          <InfoRow icon="📞" label="联系电话" value={BUSINESS_CONFIG.contact.phone} />
+          <InfoRow icon="⏰" label="营业时间" value={BUSINESS_CONFIG.contact.hours} />
+        </div>
+      </div>
+
+      {/* ⭐ 奕霖 2026-08-13 20:21：微信/QQ 内置浏览器检测引导 */}
+      <WechatHint />
+      <div style={{
+        textAlign: 'center', padding: '20px 0 100px',
+        fontSize: 12, color: 'rgba(44, 24, 16,0.35)',
+      }}>
+        © 2026 {BUSINESS_CONFIG.name} · 铜仁市碧江区
+      </div>
+
+      {/* ============ 预约弹窗 ============ */}
+      {bookingOpen && (
+        <div onClick={() => setBookingOpen(false)} style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+          paddingTop: 'max(60px, env(safe-area-inset-top, 60px))',
+          paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+          zIndex: 1000,
+          overflowY: 'auto',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #0a1410 0%, #0a0f0d 100%)',
+            borderRadius: 20,
+            width: '100%', maxWidth: 500,
+            maxHeight: 'calc(100dvh - 220px)',
+            display: 'flex', flexDirection: 'column',
+            borderTop: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+            border: `1px solid rgba(${GREEN_RGBA}, 0.2)`,
+            overflow: 'hidden',
+            marginTop: 'auto',
+            marginBottom: 'auto',
+          }}>
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 24 }}>
+              <div style={{
+                width: 40, height: 4, background: `rgba(${GREEN_RGBA}, 0.3)`,
+                borderRadius: 2, margin: '0 auto 16px',
+              }} />
+              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: '#2c1810' }}>
+                📅 预约服务
+              </h3>
+
+              {submitted && bookingResult ? (
+              <div style={{ textAlign: 'center', padding: '32px 20px' }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: GREEN }}>预约成功</div>
+                <div style={{ fontSize: 12, color: 'rgba(44, 24, 16,0.5)', marginTop: 4 }}>
+                  商家会尽快与您联系
+                </div>
+                {/* 订单 + 积分 */}
+                <div style={{
+                  marginTop: 20, padding: 16,
+                  background: 'rgba(127, 220, 148, 0.08)',
+                  border: '1px solid rgba(127, 220, 148, 0.25)',
+                  borderRadius: 12,
+                }}>
+                  <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.5)', marginBottom: 4 }}>
+                    订单号
+                  </div>
+                  <div style={{
+                    fontSize: 14, fontWeight: 600, color: GREEN,
+                    fontFamily: 'monospace', marginBottom: 12,
+                  }}>
+                    {bookingResult.orderNo}
+                  </div>
+                  <div style={{
+                    height: 1, background: 'rgba(127, 220, 148, 0.2)', margin: '0 0 12px',
+                  }} />
+                  <div style={{ fontSize: 12, color: 'rgba(44, 24, 16,0.7)' }}>
+                    获得积分 <span style={{ color: GREEN, fontWeight: 700 }}>+{bookingResult.pointsAdded}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(44, 24, 16,0.7)', marginTop: 4 }}>
+                    累计积分 <span style={{ color: GREEN, fontWeight: 700 }}>{bookingResult.totalPoints}</span>
+                  </div>
+                </div>
+              </div>
+            ) : submitted ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: GREEN }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>预约成功！</div>
+              </div>
+            ) : (
+              <form data-booking-form onSubmit={handleBooking} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Field label="姓名" required>
+                  <input
+                    required
+                    value={bookingForm.name}
+                    onChange={(e) => setBookingForm({ ...bookingForm, name: e.target.value })}
+                    placeholder="请输入您的姓名"
+                    style={inputStyle}
+                  />
+                </Field>
+                <Field label="电话" required>
+                  <input
+                    required type="tel"
+                    value={bookingForm.phone}
+                    onChange={(e) => setBookingForm({ ...bookingForm, phone: e.target.value })}
+                    placeholder="请输入联系电话"
+                    style={inputStyle}
+                  />
+                </Field>
+                <Field label="服务类型">
+                  <select
+                    value={bookingForm.service}
+                    onChange={(e) => setBookingForm({ ...bookingForm, service: e.target.value })}
+                    style={inputStyle}
+                  >
+                    {services.map((s) => (
+                      <option key={s.name} value={s.name} style={{ background: '#0a1410' }}>
+                        {s.icon} {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label="日期" required>
+                    <input
+                      required type="date"
+                      value={bookingForm.date}
+                      onChange={(e) => setBookingForm({ ...bookingForm, date: e.target.value })}
+                      style={inputStyle}
+                    />
+                  </Field>
+                  <Field label="时间" required>
+                    <input
+                      required type="time"
+                      value={bookingForm.time}
+                      onChange={(e) => setBookingForm({ ...bookingForm, time: e.target.value })}
+                      style={inputStyle}
+                    />
+                  </Field>
+                </div>
+                <Field label="备注">
+                  <textarea
+                    value={bookingForm.note}
+                    onChange={(e) => setBookingForm({ ...bookingForm, note: e.target.value })}
+                    placeholder="如有特殊需求请说明..."
+                    rows={3}
+                    style={{ ...inputStyle, resize: 'none', fontFamily: 'inherit' }}
+                  />
+                </Field>
+              </form>
+              )}
+            </div>{/* 关闭 flex:1 scroll 区 */}
+            
+            {/* ⭐ Sticky bottom CTA - 永远在底部固定，不管内容多长 */}
+            {!submitted && (
+              <div style={{
+                flexShrink: 0,
+                padding: '16px 24px',
+                paddingBottom: 'max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))',
+                background: 'rgba(8, 16, 12, 0.95)',
+                borderTop: `1px solid rgba(${GREEN_RGBA}, 0.15)`,
+              }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // 触发表单提交
+                    const form = document.querySelector('[data-booking-form]') as HTMLFormElement
+                    form?.requestSubmit()
+                  }}
+                  disabled={submitting}
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: submitting
+                      ? 'rgba(245, 234, 211,0.3)'
+                      : `linear-gradient(135deg, ${GREEN}, #6abf78)`,
+                    color: submitting ? 'rgba(245, 234, 211,0.5)' : '#0a1410',
+                    border: 'none',
+                    borderRadius: 12,
+                    fontSize: 15, fontWeight: 700,
+                    cursor: submitting ? 'wait' : 'pointer',
+                    boxShadow: submitting ? 'none' : '0 4px 16px rgba(127, 220, 148, 0.25)',
+                  }}
+                >
+                  {submitting ? '提交中...' : '确认预约'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ============ 我的会员 弹窗 ============ */}
+      {memberOpen && (
+        <div onClick={() => setMemberOpen(false)} style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+          paddingTop: 'max(60px, env(safe-area-inset-top, 60px))', // ⭐ 不吸附顶部, 居中弹出
+          paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))', // ⭐ 给 TabBar safe space
+          zIndex: 1000,
+          overflowY: 'auto',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #0a1410 0%, #0a0f0d 100%)',
+            borderRadius: 20,
+            width: '100%', maxWidth: 500,
+            maxHeight: 'calc(100dvh - 220px)', // ⭐ modal 高度限制，居中 + 留 TabBar safe space
+            display: 'flex',
+            flexDirection: 'column',
+            borderTop: `1px solid rgba(${GREEN_RGBA}, 0.3)`,
+            border: `1px solid rgba(${GREEN_RGBA}, 0.2)`,
+            overflow: 'hidden',
+            marginTop: 'auto',
+            marginBottom: 'auto',
+          }}>
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 24 }}>
+            <div style={{
+              width: 36, height: 4, background: 'rgba(245, 234, 211,0.2)',
+              borderRadius: 2, margin: '0 auto 16px',
+            }} />
+            <h3 style={{
+              fontSize: 18, fontWeight: 700, marginBottom: 16,
+              color: '#2c1810', textAlign: 'center',
+            }}>
+              🎫 我的会员
+            </h3>
+
+            {!memberData ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <Field label="请输入手机号查积分" required center>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={memberPhone}
+                    onChange={(e) => setMemberPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                    onKeyDown={(e) => e.key === 'Enter' && handleMemberLookup()}
+                    placeholder="13900000000"
+                    maxLength={11}
+                    autoFocus
+                    style={{
+                      ...inputStyle,
+                      textAlign: 'center',
+                      letterSpacing: '2px',
+                      fontSize: 18,
+                      fontWeight: 600,
+                      minHeight: 52,
+                    }}
+                  />
+                </Field>
+                <button
+                  onClick={handleMemberLookup}
+                  disabled={memberLoading || memberPhone.length !== 11}
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: memberLoading || memberPhone.length !== 11
+                      ? `rgba(${GREEN_RGBA}, 0.2)`
+                      : `linear-gradient(135deg, ${GREEN}, #6abf78)`,
+                    color: '#0a1410',
+                    border: 'none',
+                    borderRadius: 12,
+                    fontSize: 15, fontWeight: 700,
+                    cursor: memberLoading || memberPhone.length !== 11 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {memberLoading ? '查询中...' : '查询会员信息'}
+                </button>
+                <p style={{
+                  fontSize: 11, color: 'rgba(44, 24, 16,0.4)',
+                  textAlign: 'center', marginTop: 8,
+                }}>
+                  首次预约即可成为会员，开始累积积分
+                </p>
+              </div>
+            ) : !memberData.isMember ? (
+              <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>🎫</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#2c1810' }}>
+                  {memberData.message}
+                </div>
+                <button
+                  onClick={() => { setMemberOpen(false); setBookingOpen(true); }}
+                  style={{
+                    marginTop: 20,
+                    padding: '12px 28px',
+                    background: `linear-gradient(135deg, ${GREEN}, #6abf78)`,
+                    color: '#0a1410', border: 'none', borderRadius: 12,
+                    fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  立即预约成为会员
+                </button>
+              </div>
+            ) : (
+              <div>
+                {/* 头部会员卡 */}
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(127,220,148,0.2) 0%, rgba(127,220,148,0.05) 100%)',
+                  border: '1px solid rgba(127,220,148,0.3)',
+                  borderRadius: 16,
+                  padding: 20, marginBottom: 16,
+                  position: 'relative', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    fontSize: 12, color: 'rgba(44, 24, 16,0.5)',
+                    marginBottom: 4,
+                  }}>{memberData.merchant.name} · {memberData.tier.name}</div>
+                  <div style={{
+                    fontSize: 24, fontWeight: 700, color: '#2c1810',
+                    fontFamily: 'monospace', letterSpacing: 1,
+                    marginBottom: 16,
+                  }}>
+                    {memberData.customer.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}
+                  </div>
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.5)' }}>累计积分</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: GREEN }}>
+                        {memberData.customer.points}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.5)' }}>累计消费</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2c1810' }}>
+                        ¥{memberData.customer.totalSpent}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.5)' }}>订单数</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2c1810' }}>
+                        {memberData.customer.totalOrders}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 等级进度 */}
+                {memberData.tier.nextThreshold && (
+                  <div style={{
+                    background: 'rgba(245, 234, 211,0.04)',
+                    borderRadius: 12, padding: 12, marginBottom: 16,
+                  }}>
+                    <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.5)', marginBottom: 6 }}>
+                      距离下一等级（¥{memberData.tier.nextThreshold}）还差 ¥{(memberData.tier.nextThreshold - memberData.customer.totalSpent).toFixed(0)}
+                    </div>
+                    <div style={{
+                      width: '100%', height: 6,
+                      background: 'rgba(245, 234, 211,0.1)',
+                      borderRadius: 3, overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        width: `${Math.min(100, (memberData.customer.totalSpent / memberData.tier.nextThreshold) * 100)}%`,
+                        height: '100%',
+                        background: GREEN,
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* 最近订单 */}
+                <div style={{
+                  fontSize: 13, fontWeight: 600, color: '#2c1810',
+                  marginBottom: 8,
+                }}>最近订单</div>
+                {memberData.recentOrders.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center', padding: 16,
+                    color: 'rgba(44, 24, 16,0.4)', fontSize: 12,
+                  }}>暂无订单</div>
+                ) : (
+                  <div style={{
+                    background: 'rgba(245, 234, 211,0.04)',
+                    borderRadius: 12, overflow: 'hidden',
+                  }}>
+                    {memberData.recentOrders.slice(0, 5).map((o: any, i: number) => (
+                      <div key={o.id} style={{
+                        padding: 12,
+                        borderBottom: i < Math.min(4, memberData.recentOrders.length - 1)
+                          ? '1px solid rgba(245, 234, 211,0.05)' : 'none',
+                      }}>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between',
+                          marginBottom: 4,
+                        }}>
+                          <span style={{ fontSize: 12, color: 'rgba(44, 24, 16,0.6)', fontFamily: 'monospace' }}>
+                            {o.orderNo}
+                          </span>
+                          <span style={{
+                            fontSize: 11,
+                            color: o.status === 'completed' ? GREEN : 'rgba(245, 234, 211,0.5)',
+                          }}>
+                            {o.status === 'completed' ? '已完成' : o.status}
+                          </span>
+                        </div>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between',
+                          fontSize: 13,
+                        }}>
+                          <span style={{ color: '#2c1810' }}>¥{o.finalAmount}</span>
+                          <span style={{ color: 'rgba(44, 24, 16,0.4)', fontSize: 11 }}>
+                            {new Date(o.createdAt).toLocaleDateString('zh-CN')}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 移动到 footer (sticky bottom) - 这里去除原 button 以免重复 */}
+
+              </div>
+            )}
+            </div>{/* 关闭 flex:1 scroll 区 */}
+            
+            {/* ⭐ Sticky bottom CTA - 永远在底部固定，不管上面多高 */}
+            {memberData && memberData.isMember && (
+              <div style={{
+                flexShrink: 0,
+                padding: '16px 24px',
+                paddingBottom: 'max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px))',
+                background: 'rgba(8, 16, 12, 0.95)',
+                borderTop: `1px solid rgba(${GREEN_RGBA}, 0.15)`,
+              }}>
+                <button
+                  onClick={() => { setMemberOpen(false); setBookingOpen(true); }}
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: `linear-gradient(135deg, ${GREEN}, #6abf78)`,
+                    color: '#0a1410', border: 'none', borderRadius: 12,
+                    fontSize: 15, fontWeight: 700, cursor: 'pointer',
+                    boxShadow: '0 4px 16px rgba(127, 220, 148, 0.25)',
+                  }}
+                >
+                  继续预约
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ 2026-09-20 01:23 奕霖立项：理发店 4 大功能区（预约/实时排队/取号/协议） */}
+      <BookingSection />
+
+    </AppLayout>
+  )
+}
+
+// ==============================================
+// 订单类型 + 状态机
+// ==============================================
+type OrderStatus = 'reserved' | 'arrived' | 'serving' | 'completed' | 'no_show'
+
+interface Order {
+  id: string
+  customerName: string
+  customerPhone: string      // 主键（不登录也能跟踪）
+  service: '剪发' | '烫发' | '染发' | '护理'
+  stylistName: string
+  status: OrderStatus
+  scheduledAt: string         // HH:MM
+  scheduledDate: 'today' | 'tomorrow' | 'dayAfter'
+  arrivedAt?: string
+  startedAt?: string
+  completedAt?: string
+  note?: string
+}
+
+const INITIAL_ORDERS: Order[] = [
+  // serving - 正在服务
+  { id: 'O001', customerName: '李先生', customerPhone: '138****1234', service: '烫发', stylistName: 'Tony', status: 'serving', scheduledAt: '14:00', scheduledDate: 'today', startedAt: '14:05' },
+  // arrived - 已到店等待
+  { id: 'O002', customerName: '王女士', customerPhone: '139****5678', service: '剪发', stylistName: 'Amy', status: 'arrived', scheduledAt: '14:30', scheduledDate: 'today', arrivedAt: '14:28' },
+  { id: 'O008', customerName: '周先生', customerPhone: '139****6789', service: '剪发', stylistName: 'Lily', status: 'arrived', scheduledAt: '15:00', scheduledDate: 'today', arrivedAt: '14:50' },
+  // reserved today - 今日预约
+  { id: 'O003', customerName: '张先生', customerPhone: '138****9012', service: '染发', stylistName: 'Lily', status: 'reserved', scheduledAt: '15:00', scheduledDate: 'today' },
+  { id: 'O004', customerName: '陈女士', customerPhone: '136****3456', service: '护理', stylistName: 'Tony', status: 'reserved', scheduledAt: '16:00', scheduledDate: 'today' },
+  // reserved tomorrow - 明日下午 4 点（奕霖原话举例）
+  { id: 'O005', customerName: '李先生', customerPhone: '138****1234', service: '烫发', stylistName: 'Tony', status: 'reserved', scheduledAt: '16:00', scheduledDate: 'tomorrow', note: '明天下午 4 点' },
+  { id: 'O006', customerName: '赵女士', customerPhone: '137****7890', service: '剪发', stylistName: 'Lily', status: 'reserved', scheduledAt: '15:30', scheduledDate: 'tomorrow' },
+  { id: 'O007', customerName: '孙先生', customerPhone: '135****2345', service: '染发', stylistName: 'Amy', status: 'reserved', scheduledAt: '17:00', scheduledDate: 'tomorrow' },
+  // ⭐ 2026-09-20 13:39 v7：演示滚动 — 加 6 条排队数据，总共 10 单
+  { id: 'O009', customerName: '钱女士', customerPhone: '135****1111', service: '剪发', stylistName: 'Amy', status: 'reserved', scheduledAt: '15:30', scheduledDate: 'today' },
+  { id: 'O010', customerName: '郑先生', customerPhone: '136****2222', service: '烫发', stylistName: 'Tony', status: 'reserved', scheduledAt: '16:30', scheduledDate: 'today' },
+  { id: 'O011', customerName: '吴女士', customerPhone: '137****3333', service: '染发', stylistName: 'Lily', status: 'reserved', scheduledAt: '17:00', scheduledDate: 'today' },
+  { id: 'O012', customerName: '冯先生', customerPhone: '138****4444', service: '护理', stylistName: 'Amy', status: 'reserved', scheduledAt: '17:30', scheduledDate: 'today' },
+  { id: 'O013', customerName: '陈女士', customerPhone: '139****5555', service: '剪发', stylistName: 'Tony', status: 'reserved', scheduledAt: '18:00', scheduledDate: 'today' },
+  { id: 'O014', customerName: '韩女士', customerPhone: '135****6666', service: '烫发', stylistName: 'Lily', status: 'reserved', scheduledAt: '18:30', scheduledDate: 'today' },
+]
+
+function maskPhone(p: string): string {
+  return p.length >= 7 ? p.slice(0, 3) + '****' + p.slice(-4) : p
+}
+
+function statusLabel(s: OrderStatus): { text: string; bg: string; color: string } {
+  switch (s) {
+    case 'reserved': return { text: '已预约', bg: 'rgba(184, 134, 11, 0.15)', color: '#8b6508' }
+    case 'arrived': return { text: '已到店', bg: 'rgba(45, 125, 50, 0.15)', color: '#2e7d32' }
+    case 'serving': return { text: '正在服务', bg: 'rgba(184, 134, 11, 0.95)', color: '#fff' }
+    case 'completed': return { text: '已完成', bg: 'rgba(139, 0, 0, 0.15)', color: '#8b0000' }
+    case 'no_show': return { text: '未到店', bg: 'rgba(141, 110, 99, 0.2)', color: '#5d4037' }
+  }
+}
+
+// ==============================================
+// BookingSection v4（状态机 + 店长控制台）
+// ==============================================
+function BookingSection() {
+  // 中国时间同步
+  const [now, setNow] = useState(() => new Date())
+
+  // 订单状态
+  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS)
+
+  // 店长模式（含 PIN 认证 + 自动锁定）
+  const [managerMode, setManagerMode] = useState(false)
+  const [pinModal, setPinModal] = useState<null | 'setup' | 'unlock' | 'change'>(null)
+  const [showPinPrompt, setShowPinPrompt] = useState(false)
+  const [_, forceAuthRefresh] = useState(0)
+
+  // 首次进店检测 + 自动锁定定时器
+  // Effect 1：仅挂载时跑一次（首次进店提示 + 自动开启）
+  useEffect(() => {
+    if (!hasPin() && !getRemindState().dismissed) {
+      setShowPinPrompt(true)
+    }
+    if (hasPin() && !isLockExpired()) {
+      setManagerMode(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Effect 2：每 30 秒检测自动锁定（仅在 managerMode ON 时检查）
+  useEffect(() => {
+    if (!managerMode) return
+    const id = setInterval(() => {
+      if (hasPin() && isLockExpired()) {
+        setManagerMode(false)
+        forceAuthRefresh(x => x + 1)
+      }
+    }, 30 * 1000)
+    return () => clearInterval(id)
+  }, [managerMode])
+
+  // 活动流
+  const [activities, setActivities] = useState([
+    { time: '14:32', text: '📅 李先生预约明天下午 4 点' },
+    { time: '14:30', text: '✅ 王女士完成剪发' },
+    { time: '14:28', text: '👋 王女士到店' },
+  ])
+
+  // 叫号推送 Toast
+  const [toast, setToast] = useState('')
+
+  // 弹窗
+  const [modal, setModal] = useState<null | 'booking' | 'ticket' | 'agreement'>(null)
+  const [bookingSuccess, setBookingSuccess] = useState('')
+  const [ticketSuccess, setTicketSuccess] = useState('')
+
+  // 时间同步
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const timeStr = now.toLocaleTimeString('zh-CN', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false, timeZone: 'Asia/Shanghai',
+  })
+  const dateStr = now.toLocaleDateString('notas', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'Asia/Shanghai',
+  })
+  const weekdayStr = '星期' + ['日','一','二','三','四','五','六'][now.getDay()]
+
+  // ⭐ 2026-09-20 15:07 奕霖立：实时排队列表 view 状态（state 必须最先定义）
+  const [queueView, setQueueView] = useState<'flat' | 'byStylist'>('flat')
+
+  // ⭐ 2026-09-20 15:34 奕霖立：店长控制台模式（3 档套餐 / per-stylist 自助管）
+  type ManagerMode = 'owner' | 'perStylist' | 'ai'
+  const [managerTab, setManagerTab] = useState<ManagerMode>('owner')
+  const [managedStylist, setManagedStylist] = useState<'Tony' | 'Amy' | 'Lily'>('Tony')
+
+  // 状态切换 helper
+  function transition(id: string, newStatus: OrderStatus, activityText: string) {
+    setOrders(prev => prev.map(o => {
+      if (o.id !== id) return o
+      const updated = { ...o, status: newStatus }
+      const nowTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' })
+      if (newStatus === 'arrived') updated.arrivedAt = nowTime
+      if (newStatus === 'serving') updated.startedAt = nowTime
+      if (newStatus === 'completed') updated.completedAt = nowTime
+      return updated
+    }))
+    const t = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' })
+    setActivities(prev => [{ time: t, text: activityText }, ...prev].slice(0, 5))
+  }
+
+  function callCustomer(id: string) {
+    const o = orders.find(x => x.id === id)
+    if (!o) return
+    setToast(`📢 叫号推送已发送 · ${o.customerName} (${o.customerPhone}) · 微信/短信`)
+    setTimeout(() => setToast(''), 3500)
+    const t = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' })
+    setActivities(prev => [{ time: t, text: `📢 叫号推送 · ${o.customerName}` }, ...prev].slice(0, 5))
+  }
+
+  // 计算 derived data
+  const servingOrders = orders.filter(o => o.status === 'serving')
+  const arrivedOrders = orders.filter(o => o.status === 'arrived').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  const reservedTodayOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'today').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  const stylistsList: ('Tony' | 'Amy' | 'Lily')[] = ['Tony', 'Amy', 'Lily']
+  // ⭐ 2026-09-20 15:07 奕霖立：per-stylist 分组（必须依赖 arrivedOrders/reservedTodayOrders 定义后）
+  const ordersByStylist: Record<'Tony' | 'Amy' | 'Lily', Order[]> = (() => {
+    const groups: Record<'Tony' | 'Amy' | 'Lily', Order[]> = { Tony: [], Amy: [], Lily: [] }
+    ;[...arrivedOrders, ...reservedTodayOrders].forEach(o => {
+      if (!groups[o.stylistName as 'Tony' | 'Amy' | 'Lily']) groups[o.stylistName as 'Tony' | 'Amy' | 'Lily'] = []
+      groups[o.stylistName as 'Tony' | 'Amy' | 'Lily'].push(o)
+    })
+    return groups
+  })()
+  const reservedTomorrowOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'tomorrow').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  const activeOrders = orders.filter(o => o.status === 'serving' || o.status === 'arrived' || o.status === 'reserved')
+  const currentServing = servingOrders[0]
+
+  // 用户位置（前面还有 N 位）
+  const userNumber = bookingSuccess || ticketSuccess
+  const totalInQueue = arrivedOrders.length + reservedTodayOrders.length
+  // 现场取号排在 arrived 末尾，预约用户按 scheduledAt 插入相应位置
+  const userPositionAhead = userNumber ? (ticketSuccess ? arrivedOrders.length : 0) : 0
+  const userEtaMin = userPositionAhead > 0 ? userPositionAhead * 15 : 0
+
+  // 主题色
+  const t = {
+    bgDeep: '#faf6f0',
+    bgCard: '#fffaf0',
+    primary: '#b8860b',
+    primaryDark: '#8b6508',
+    primaryGlow: 'rgba(184, 134, 11, 0.12)',
+    text: '#2c1810',
+    textSecondary: '#5d4037',
+    textMuted: '#8d6e63',
+    border: 'rgba(184, 134, 11, 0.22)',
+    accent: '#8b0000',
+    success: '#2e7d32',
+    successGlow: 'rgba(46, 125, 50, 0.15)',
+    overlayBg: 'rgba(44, 24, 16, 0.6)',
+    userGlow: 'linear-gradient(135deg, rgba(184, 134, 11, 0.95), rgba(139, 101, 8, 0.95))',
+  }
+
+  return (
+    <section id="booking-section" style={{
+      padding: '40px 16px 60px',
+      background: t.bgDeep,
+      borderTop: `1px solid ${t.border}`,
+    }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        {/* ⭐ 2026-09-20 17:30 奕霖拍板：首页删除“线上一键预约”区，全部功能搬到 /merchant/queue 独立页面 */}
+
+        {/* 您的号码高亮卡片 */}
+        {userNumber && (
+          <div style={{
+            marginBottom: 16,
+            padding: '18px 22px',
+            background: t.userGlow,
+            borderRadius: 14,
+            color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            boxShadow: '0 6px 24px rgba(184, 134, 11, 0.3)',
+            flexWrap: 'wrap', gap: 12,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 28 }}>🎫</span>
+              <div>
+                <div style={{ fontSize: 11, opacity: 0.9, letterSpacing: '0.05em' }}>
+                  {bookingSuccess ? '您的预约号' : '您的排队号'}
+                </div>
+                <div style={{
+                  fontSize: 28, fontWeight: 900, fontFamily: 'monospace',
+                  letterSpacing: '0.08em', lineHeight: 1.1,
+                }}>
+                  {userNumber}
+                </div>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, opacity: 0.9 }}>
+                前面还有 <b style={{ fontSize: 20, fontFamily: 'monospace' }}>{userPositionAhead}</b> 位
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.9 }}>
+                预计等待 <b style={{ fontSize: 16, fontFamily: 'monospace' }}>{userEtaMin}</b> 分钟
+              </div>
+            </div>
+            <button
+              onClick={() => { setBookingSuccess(''); setTicketSuccess('') }}
+              style={{
+                background: 'rgba(255,255,255,0.22)',
+                border: 'none', borderRadius: 8,
+                padding: '6px 12px',
+                color: '#fff', fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              ✕ 关闭
+            </button>
+          </div>
+        )}
+
+        {/* ⭐ 2026-09-20 14:26 奕霖立：首次进店 PIN 提示卡（可选设置） */}
+        {showPinPrompt && !hasPin() && (
+          <div style={{
+            marginBottom: 16,
+            padding: '14px 18px',
+            background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+            border: '1px solid #f59e0b',
+            borderRadius: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#78350f', marginBottom: 4 }}>
+                🔐 提示：是否设置 PIN 密码保护店长模式？
+              </div>
+              <div style={{ fontSize: 12, color: '#92400e' }}>
+                店员手机也能扫码进页，只有输入正确 PIN 才能进店长模式
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setPinModal('setup')}
+                style={{
+                  padding: '8px 16px',
+                  background: '#92400e', color: '#fff', border: 'none',
+                  borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                }}
+              >设置 PIN</button>
+              <button
+                onClick={() => { dismissRemind(); setShowPinPrompt(false) }}
+                style={{
+                  padding: '8px 12px',
+                  background: 'transparent', color: '#92400e',
+                  border: '1px solid #92400e',
+                  borderRadius: 8, fontSize: 12, cursor: 'pointer',
+                }}
+              >以后再说</button>
+              <button
+                onClick={() => { dismissRemind(); setShowPinPrompt(false) }}
+                title="下次不再提醒此提示"
+                style={{
+                  padding: '8px 12px',
+                  background: 'transparent', color: '#92400e',
+                  border: 'none',
+                  borderRadius: 8, fontSize: 11, cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >不再提醒</button>
+            </div>
+          </div>
+        )}
+
+        {/* ⭐ 店长控制台（managerMode toggle，OFF 时只显示紧凑切换按钮） */}
+        <div style={{ marginBottom: 16 }}>
+          {managerMode ? (
+            <>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                marginBottom: 10,
+                flexWrap: 'wrap', gap: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap' }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: t.text, margin: 0 }}>
+                    🎛️ 店长控制台
+                  </h3>
+                  {/* ⭐ 2026-09-20 15:34 奕霖立：3 档模式选择器（基础/智能/旗舰） */}
+                  <div style={{
+                    display: 'flex', background: t.bgDeep,
+                    borderRadius: 6, padding: 2,
+                    border: `1px solid ${t.border}`,
+                  }}>
+                    {([
+                      { key: 'owner',       label: '👑 老板管',     hint: '基础版' },
+                      { key: 'perStylist',  label: '👨‍🎨 自助管',   hint: '智能版' },
+                      { key: 'ai',          label: '🤖 AI 管',     hint: '旗舰版' },
+                    ] as { key: ManagerMode; label: string; hint: string }[]).map(tab => (
+                      <button
+                        key={tab.key}
+                        onClick={() => setManagerTab(tab.key)}
+                        style={{
+                          padding: '5px 10px',
+                          background: managerTab === tab.key ? t.primary : 'transparent',
+                          color: managerTab === tab.key ? '#fff' : t.textMuted,
+                          border: 'none', borderRadius: 4,
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >{tab.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: t.textMuted }}>
+                    {managerTab === 'owner' && `共 ${activeOrders.length} 单进行中`}
+                    {managerTab === 'perStylist' && `${managedStylist} 的单`}
+                    {managerTab === 'ai' && 'AI 自动管理'}
+                  </span>
+                  <button
+                    onClick={() => setManagerMode(false)}
+                    style={{
+                      padding: '6px 14px',
+                      background: t.accent,
+                      color: '#fff', border: 'none', borderRadius: 8,
+                      fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    ✕ 关闭店长模式
+                  </button>
+                </div>
+                {hasPin() && (
+                  <button
+                    onClick={() => setPinModal('change')}
+                    style={{
+                      marginLeft: 8,
+                      padding: '6px 12px',
+                      background: 'transparent',
+                      color: t.primary, border: `1px solid ${t.primary}`,
+                      borderRadius: 8,
+                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    🔑 修改 PIN
+                  </button>
+                )}
+              </div>
+
+              <div style={{
+                background: t.bgCard,
+                border: `2px solid ${t.primary}`,
+                borderRadius: 12,
+                padding: 14,
+                boxShadow: '0 4px 16px rgba(184, 134, 11, 0.1)',
+              }}>
+              {managerTab === 'perStylist' && (
+                <div style={{
+                  display: 'flex', gap: 6, marginBottom: 12,
+                  padding: 6,
+                  background: t.bgDeep,
+                  borderRadius: 8,
+                  border: `1px solid ${t.border}`,
+                }}>
+                  {([
+                    { name: 'Tony',  emoji: '👨‍🎨' },
+                    { name: 'Amy',   emoji: '👩‍💼' },
+                    { name: 'Lily',  emoji: '💁‍♀️' },
+                  ] as { name: 'Tony' | 'Amy' | 'Lily'; emoji: string }[]).map(s => {
+                    const cnt = activeOrders.filter(o => o.stylistName === s.name).length
+                    // ⭐ 16:37 奕霖拍板：店长卡片只需 emoji + 名字 + 单数
+                    const isSelected = managedStylist === s.name
+                    return (
+                      <button
+                        key={s.name}
+                        onClick={() => setManagedStylist(s.name)}
+                        style={{
+                          flex: 1, padding: '8px 4px',
+                          background: isSelected ? t.primary : 'transparent',
+                          color: isSelected ? '#fff' : t.text,
+                          border: 'none', borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                        }}
+                      >
+                        <span style={{ fontSize: 16 }}>{s.emoji}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700 }}>{s.name}</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 600,
+                          opacity: isSelected ? 0.95 : 0.7,
+                        }}>{cnt} 单</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {managerTab === 'ai' && (
+                <div style={{
+                  padding: '40px 20px', textAlign: 'center',
+                  background: t.bgDeep,
+                  borderRadius: 10,
+                  border: `1px dashed ${t.border}`,
+                }}>
+                  <div style={{ fontSize: 36, marginBottom: 12 }}>🤖</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 6 }}>
+                    AI 自动管理 · 即将上线
+                  </div>
+                  <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 12 }}>
+                    AI 将自动叫号、确认到店、推进进度
+                  </div>
+                  <div style={{
+                    display: 'inline-block',
+                    padding: '4px 12px',
+                    background: 'rgba(184, 134, 11, 0.15)',
+                    color: t.primary,
+                    borderRadius: 12, fontSize: 11, fontWeight: 700,
+                  }}>旗舰版 ¥299/月</div>
+                </div>
+              )}
+
+              {managerTab !== 'ai' && (
+                (() => {
+                  const displayedOrders = managerTab === 'perStylist'
+                    ? activeOrders.filter(o => o.stylistName === managedStylist)
+                    : activeOrders
+                  return displayedOrders.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: t.textMuted, fontSize: 13 }}>
+                      😊 {managerTab === 'perStylist' ? `${managedStylist} 暂无进行中单` : '当前没有进行中的订单'}
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', gap: 8,
+                      maxHeight: 400, overflowY: 'auto',
+                      paddingRight: 6, marginRight: -6,
+                    } as React.CSSProperties}>
+                      {displayedOrders.map(o => {
+                    const badge = statusLabel(o.status)
+                    return (
+                      <div key={o.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 12px',
+                        background: t.bgDeep,
+                        border: `1px solid ${t.border}`,
+                        borderRadius: 10,
+                        flexWrap: 'wrap',
+                        flexShrink: 0,
+                      }}>
+                        {/* 序号时间 */}
+                        <div style={{
+                          minWidth: 50, textAlign: 'center',
+                          padding: '4px 8px', background: t.primaryGlow,
+                          borderRadius: 6, fontFamily: 'monospace',
+                          fontSize: 12, fontWeight: 700, color: t.primary,
+                        }}>
+                          {o.scheduledAt}
+                        </div>
+                        {/* 顾客信息 */}
+                        <div style={{ flex: 1, minWidth: 180 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>
+                            {o.customerName} <span style={{ color: t.textMuted, fontWeight: 400, fontSize: 12, marginLeft: 4 }}>{maskPhone(o.customerPhone)}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: t.textSecondary, marginTop: 2 }}>
+                            {o.service} · {o.stylistName} 老师
+                            {o.scheduledDate === 'tomorrow' && <span style={{ marginLeft: 6, color: t.primary, fontWeight: 600 }}>· 明天</span>}
+                          </div>
+                        </div>
+                        {/* 状态徽章 */}
+                        <span style={{
+                          padding: '3px 8px',
+                          background: badge.bg, color: badge.color,
+                          borderRadius: 8, fontSize: 10, fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {badge.text}
+                        </span>
+                        {/* 操作按钮 */}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {o.status === 'reserved' && (
+                            <>
+                              <button onClick={() => transition(o.id, 'arrived', `✅ ${o.customerName} 到店确认`)} style={{
+                                padding: '6px 10px', background: t.success,
+                                color: '#fff', border: 'none', borderRadius: 6,
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>确认到店</button>
+                              <button onClick={() => callCustomer(o.id)} style={{
+                                padding: '6px 10px', background: t.primaryGlow,
+                                color: t.primaryDark, border: `1px solid ${t.primary}`,
+                                borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>叫号推送</button>
+                            </>
+                          )}
+                          {o.status === 'arrived' && (
+                            <>
+                              <button onClick={() => transition(o.id, 'serving', `💇 ${o.customerName} 开始理发`)} style={{
+                                padding: '6px 10px', background: t.primary,
+                                color: '#fff', border: 'none', borderRadius: 6,
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>开始理发</button>
+                              <button onClick={() => callCustomer(o.id)} style={{
+                                padding: '6px 10px', background: t.primaryGlow,
+                                color: t.primaryDark, border: `1px solid ${t.primary}`,
+                                borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>叫号推送</button>
+                            </>
+                          )}
+                          {o.status === 'serving' && (
+                            <>
+                              <button onClick={() => transition(o.id, 'completed', `🎉 ${o.customerName} 完成服务`)} style={{
+                                padding: '6px 10px', background: t.success,
+                                color: '#fff', border: 'none', borderRadius: 6,
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>完成 ✓</button>
+                              <button onClick={() => callCustomer(o.id)} style={{
+                                padding: '6px 10px', background: t.primaryGlow,
+                                color: t.primaryDark, border: `1px solid ${t.primary}`,
+                                borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>叫号推送</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()
+          )}
+              </div>
+            </>
+          ) : (
+            <button
+              onClick={() => {
+                if (!hasPin()) {
+                  setPinModal('setup')
+                } else if (isInGracePeriod()) {
+                  // ⭐ 2026-09-20 14:37 奕霖拍板：免密宽限期内直接切换
+                  setManagerMode(true)
+                  setLastAuthTime()
+                } else {
+                  setPinModal('unlock')
+                }
+              }}
+              style={{
+                padding: '10px 18px',
+                background: t.primary,
+                color: '#fff', border: 'none', borderRadius: 10,
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+                boxShadow: '0 2px 8px rgba(184, 134, 11, 0.25)',
+              }}
+            >
+              🎛️ 开启店长模式 <span style={{ fontSize: 11, opacity: 0.85, fontWeight: 500 }}>· {activeOrders.length} 单进行中</span>
+            </button>
+          )}
+        </div>
+
+        {/* ⭐ 大面板：左序号（当前服务）+ 右活动流 + 右队列 */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          background: t.bgCard,
+          border: `1px solid ${t.border}`,
+          borderRadius: 16,
+          overflow: 'hidden',
+          boxShadow: '0 4px 24px rgba(184, 134, 11, 0.08)',
+          marginBottom: 20,
+        }}>
+          {/* 左：当前正在服务 */}
+          <div style={{
+            background: currentServing
+              ? `linear-gradient(135deg, ${t.primary}, ${t.primaryDark})`
+              : 'linear-gradient(135deg, #d4c5a0, #a89577)',
+            color: '#fff',
+            padding: '32px 20px',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 8,
+          }}>
+            {currentServing ? (
+              <>
+                <div style={{ fontSize: 11, opacity: 0.85, letterSpacing: '0.1em' }}>正在服务</div>
+                <div style={{
+                  fontSize: 52, fontWeight: 900, fontFamily: 'monospace',
+                  letterSpacing: '0.05em', lineHeight: 1,
+                }}>{currentServing.scheduledAt}</div>
+                <div style={{ fontSize: 13, opacity: 0.95, fontWeight: 600 }}>
+                  {currentServing.customerName} · {currentServing.stylistName}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.9 }}>
+                  {currentServing.service}
+                </div>
+                <div style={{
+                  marginTop: 4, padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.22)',
+                  borderRadius: 12, fontSize: 11,
+                }}>
+                  开始于 {currentServing.startedAt}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, opacity: 0.85, letterSpacing: '0.1em' }}>暂无服务</div>
+                <div style={{ fontSize: 32, opacity: 0.7 }}>— —</div>
+                <div style={{ fontSize: 13, opacity: 0.85 }}>店长可在控制台开始理发</div>
+              </>
+            )}
+          </div>
+
+          {/* 右：活动流 + 排队列表 */}
+          <div style={{ padding: '20px 24px' }}>
+            {/* 活动流 */}
+            <div style={{
+              padding: '12px 14px',
+              background: t.primaryGlow,
+              borderRadius: 10,
+              marginBottom: 16,
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: t.primary,
+                letterSpacing: '0.05em', marginBottom: 8,
+              }}>🔥 刚刚发生的</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {activities.slice(0, 4).map((act, i) => (
+                  <div key={i} style={{
+                    display: 'flex', gap: 10, alignItems: 'center',
+                    fontSize: 12, color: t.text,
+                  }}>
+                    <span style={{
+                      fontFamily: 'monospace', fontSize: 11,
+                      color: t.textMuted, minWidth: 36,
+                    }}>{act.time}</span>
+                    <span style={{ flex: 1 }}>{act.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 排队列表（已到店等待 + 今日已预约） */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: 12,
+              paddingBottom: 10,
+              borderBottom: `1px solid ${t.border}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: t.text, margin: 0 }}>
+                  🚶 实时排队
+                </h3>
+                {/* ⭐ 2026-09-20 15:07 奕霖立：视图切换 [时间][全部] */}
+                <div style={{
+                  display: 'flex', background: t.bgDeep,
+                  borderRadius: 6, padding: 2, marginLeft: 4,
+                  border: `1px solid ${t.border}`,
+                }}>
+                  <button
+                    onClick={() => setQueueView('flat')}
+                    style={{
+                      padding: '4px 10px',
+                      background: queueView === 'flat' ? t.primary : 'transparent',
+                      color: queueView === 'flat' ? '#fff' : t.textMuted,
+                      border: 'none', borderRadius: 4,
+                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >时间</button>
+                  <button
+                    onClick={() => setQueueView('byStylist')}
+                    style={{
+                      padding: '4px 10px',
+                      background: queueView === 'byStylist' ? t.primary : 'transparent',
+                      color: queueView === 'byStylist' ? '#fff' : t.textMuted,
+                      border: 'none', borderRadius: 4,
+                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >全部</button>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'baseline', gap: 4,
+              }}>
+                <span style={{
+                  fontSize: 28, fontWeight: 800, color: t.primary,
+                  fontFamily: 'monospace', lineHeight: 1,
+                }}>
+                  {totalInQueue}
+                </span>
+                <span style={{ fontSize: 12, color: t.textSecondary }}>人在排队</span>
+              </div>
+            </div>
+
+            {/* ⭐ 2026-09-20 15:07 奕霖立：按 view 切换 flat 列表 / per-stylist 3 列 */}
+            {queueView === 'flat' ? (
+              <div style={{
+                maxHeight: 320,
+                overflowY: 'auto',
+                display: 'flex', flexDirection: 'column', gap: 8,
+                paddingRight: 4,
+                marginRight: -4,
+              } as React.CSSProperties}>
+                {[...arrivedOrders, ...reservedTodayOrders].length === 0 ? (
+                  <div style={{ padding: 16, textAlign: 'center', color: t.textMuted, fontSize: 13 }}>
+                    😊 当前无人排队
+                  </div>
+                ) : (
+                  [...arrivedOrders, ...reservedTodayOrders].map((item, i) => {
+                    const isArrived = item.status === 'arrived'
+                    return (
+                      <div key={item.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '10px 12px',
+                        background: t.bgDeep,
+                        borderRadius: 10,
+                        border: `1px solid ${isArrived ? t.successGlow : t.border}`,
+                        opacity: isArrived ? 1 : 0.85,
+                        flexShrink: 0,
+                      }}>
+                        <div style={{
+                          minWidth: 50, textAlign: 'center',
+                          padding: '5px 8px',
+                          background: isArrived ? t.successGlow : t.primaryGlow,
+                          borderRadius: 8,
+                          fontFamily: 'monospace',
+                          fontSize: 13, fontWeight: 700,
+                          color: isArrived ? t.success : t.primary,
+                        }}>
+                          {item.scheduledAt}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: t.text, marginBottom: 2 }}>
+                            {item.customerName} <span style={{ color: t.textMuted, fontWeight: 400, fontSize: 12 }}>· {item.stylistName} 老师</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: t.textSecondary }}>
+                            {item.service} · {isArrived ? '已到店等待' : '已预约'}
+                          </div>
+                        </div>
+                        <div style={{
+                          display: 'flex', flexDirection: 'column', alignItems: 'center',
+                          padding: '4px 8px',
+                          background: isArrived ? t.success : t.primary,
+                          color: '#fff',
+                          borderRadius: 10,
+                          minWidth: 56,
+                        }}>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: 16, fontWeight: 800, lineHeight: 1,
+                          }}>
+                            {i + 1}
+                          </span>
+                          <span style={{ fontSize: 9, fontWeight: 600, opacity: 0.95, marginTop: 2 }}>
+                            {isArrived ? '排队位' : '预约'}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            ) : (
+              /* ⭐ 全部视图：按理发师分 3 列，每列独立滚动 */
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 8,
+                maxHeight: 320,
+                overflowY: 'auto',
+                paddingRight: 4,
+                marginRight: -4,
+              } as React.CSSProperties}>
+                {stylistsList.map(stylistName => {
+                  const stylistOrders = ordersByStylist[stylistName] || []
+                  const emoji = stylistName === 'Tony' ? '👨‍🎨' : stylistName === 'Amy' ? '👩‍💼' : '💁‍♀️'
+                  return (
+                    <div key={stylistName} style={{
+                      background: t.bgDeep,
+                      borderRadius: 10,
+                      padding: 10,
+                      border: `1px solid ${t.border}`,
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginBottom: 8,
+                        paddingBottom: 6,
+                        borderBottom: `1px solid ${t.border}`,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 16 }}>{emoji}</span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{stylistName}</span>
+                        </div>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700,
+                          padding: '2px 7px',
+                          background: stylistOrders.length > 0 ? t.primary : t.textMuted,
+                          color: '#fff',
+                          borderRadius: 10,
+                          fontFamily: 'monospace',
+                        }}>{stylistOrders.length}单</span>
+                      </div>
+                      {stylistOrders.length === 0 ? (
+                        <div style={{
+                          padding: '20px 4px', textAlign: 'center',
+                          color: t.textMuted, fontSize: 11,
+                        }}>😊 空闲</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {stylistOrders.map(o => {
+                            const isArrived = o.status === 'arrived'
+                            return (
+                              <div key={o.id} style={{
+                                padding: '6px 8px',
+                                background: t.bgCard,
+                                borderRadius: 6,
+                                borderLeft: `3px solid ${isArrived ? t.success : t.primary}`,
+                                fontSize: 11,
+                              }}>
+                                <div style={{
+                                  fontFamily: 'monospace',
+                                  fontWeight: 700,
+                                  color: isArrived ? t.success : t.primary,
+                                  marginBottom: 2,
+                                }}>{o.scheduledAt}</div>
+                                <div style={{
+                                  fontWeight: 600, color: t.text,
+                                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                }}>{o.customerName}</div>
+                                <div style={{ color: t.textMuted, fontSize: 10 }}>
+                                  {o.service} · {isArrived ? '已到' : '预约'}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 按钮区 */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+          gap: 12, marginBottom: 16,
+        }}>
+          <ActionButton icon="📅" label="在线预约" onClick={() => setModal('booking')} t={t} />
+          <ActionButton icon="🎫" label="现场取号" onClick={() => setModal('ticket')} t={t} />
+          <ActionButton icon="📋" label="预约协议" onClick={() => setModal('agreement')} t={t} />
+        </div>
+
+        {/* 协议提示条 */}
+        <div style={{
+          padding: '12px 16px',
+          background: t.bgCard,
+          border: `1px solid ${t.border}`,
+          borderRadius: 10,
+          fontSize: 12, color: t.textSecondary,
+          display: 'flex', alignItems: 'center', gap: 8,
+          marginBottom: 12,
+        }}>
+          <span style={{ fontSize: 16 }}>🛡</span>
+          <span>
+            预约请提前 <b style={{ color: t.primary }}>5 分钟</b> 到店 · 晚到 <b style={{ color: t.accent }}>2 分钟</b> 系统自动取消 · 线上预约与线下排队互斥
+          </span>
+        </div>
+
+        {/* 兜底 */}
+        {!userNumber && bookingSuccess && (
+          <div style={{
+            padding: '14px 18px',
+            background: 'rgba(46, 125, 50, 0.08)',
+            border: '1px solid rgba(46, 125, 50, 0.3)',
+            borderRadius: 10,
+            fontSize: 14, color: t.success, fontWeight: 600,
+            textAlign: 'center', marginBottom: 12,
+          }}>
+            ✅ 预约成功！预约号 <b style={{ fontSize: 18, fontFamily: 'monospace' }}>{bookingSuccess}</b>，请提前 5 分钟到店
+          </div>
+        )}
+        {!userNumber && ticketSuccess && (
+          <div style={{
+            padding: '14px 18px',
+            background: 'rgba(46, 125, 50, 0.08)',
+            border: '1px solid rgba(46, 125, 50, 0.3)',
+            borderRadius: 10,
+            fontSize: 14, color: t.success, fontWeight: 600,
+            textAlign: 'center', marginBottom: 12,
+          }}>
+            ✅ 取号成功！排队号 <b style={{ fontSize: 18, fontFamily: 'monospace' }}>{ticketSuccess}</b>
+          </div>
+        )}
+      </div>
+
+      {/* 弹窗 */}
+      {modal === 'booking' && (
+        <BookingModal t={t} onClose={() => setModal(null)}
+          onSuccess={(no) => { setBookingSuccess(no); setModal(null) }} />
+      )}
+      {modal === 'ticket' && (
+        <TicketModal t={t} onClose={() => setModal(null)}
+          onSuccess={(no) => { setTicketSuccess(no); setModal(null) }} />
+      )}
+      {modal === 'agreement' && (
+        <AgreementModal t={t} onClose={() => setModal(null)} />
+      )}
+
+      {/* ⭐ 2026-09-20 14:26 奕霖立：PIN 弹窗挂载 */}
+      {pinModal === 'setup' && (
+        <PinSetupModal t={t} onClose={() => setPinModal(null)} isFirstTime={!hasPin()}
+          onSuccess={() => { setManagerMode(true); setShowPinPrompt(false); setLastAuthTime() }} />
+      )}
+      {pinModal === 'change' && (
+        <PinSetupModal t={t} onClose={() => setPinModal(null)} isFirstTime={false} />
+      )}
+      {pinModal === 'unlock' && (
+        <PinUnlockModal t={t} onClose={() => setPinModal(null)}
+          onSuccess={() => { setManagerMode(true); setLastAuthTime() }} />
+      )}
+
+      {/* 叫号推送 Toast */}
+      {toast && (
+        <div onClick={() => setToast('')} style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          padding: '12px 20px',
+          background: 'linear-gradient(135deg, #b8860b, #8b6508)',
+          color: '#fff', borderRadius: 10,
+          boxShadow: '0 8px 32px rgba(184, 134, 11, 0.3)',
+          fontSize: 14, fontWeight: 600,
+          zIndex: 1100,
+          cursor: 'pointer',
+          maxWidth: '90vw', textAlign: 'center',
+        }}>
+          {toast}
+          <div style={{ fontSize: 10, opacity: 0.85, marginTop: 4 }}>点击关闭</div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+
+function ActionButton({ icon, label, onClick, t }: {
+  icon: string; label: string; onClick: () => void; t: any
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '16px 18px',
+        background: t.bgCard,
+        border: `1px solid ${t.border}`,
+        borderRadius: 12,
+        cursor: 'pointer',
+        fontSize: 15, fontWeight: 600,
+        color: t.text,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        boxShadow: '0 2px 8px rgba(184, 134, 11, 0.06)',
+      }}
+    >
+      <span style={{ fontSize: 20 }}>{icon}</span>
+      <span>{label}</span>
+    </button>
+  )
+}
+
+// ⭐ 弹窗遮罩
+function ModalOverlay({ children, onClose, t }: {
+  children: React.ReactNode; onClose: () => void; t: any
+}) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0,
+      background: t.overlayBg,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 16,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: t.bgCard,
+        borderRadius: 16,
+        width: '100%', maxWidth: 440,
+        maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 16px 48px rgba(0, 0, 0, 0.2)',
+        border: `1px solid ${t.border}`,
+      }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ⭐ 弹窗头部
+function ModalHeader({ title, onClose, t }: {
+  title: string; onClose: () => void; t: any
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '16px 20px',
+      borderBottom: `1px solid ${t.border}`,
+    }}>
+      <h3 style={{ fontSize: 18, fontWeight: 700, color: t.text }}>{title}</h3>
+      <button onClick={onClose} style={{
+        background: 'transparent', border: 'none',
+        fontSize: 24, color: t.textMuted,
+        cursor: 'pointer', padding: 0, lineHeight: 1,
+      }}>×</button>
+    </div>
+  )
+}
+
+// ⭐ 表单字段（不与原有 Field 冲突）
+function FormField({ label, required, children, t }: {
+  label: string; required?: boolean; children: React.ReactNode; t: any
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: t.textSecondary, fontWeight: 500, marginBottom: 4 }}>
+        {label} {required && <span style={{ color: t.accent }}>*</span>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ⭐ 在线预约弹窗
+function BookingModal({ t, onClose, onSuccess }: {
+  t: any; onClose: () => void; onSuccess: (no: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [stylist, setStylist] = useState<'Tony' | 'Amy' | 'Lily'>('Tony')
+  const [dateKey, setDateKey] = useState<'today' | 'tomorrow' | 'dayAfter'>('today')
+  const [timeSlot, setTimeSlot] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [bookedHint, setBookedHint] = useState('')
+
+  // ⭐ 2026-09-20 14:47 奕霖立：24 个时段 (10:00-21:30, 半小时一档)
+  const TIME_SLOTS: string[] = []
+  for (let h = 10; h <= 21; h++) {
+    TIME_SLOTS.push(`${h}:00`)
+    TIME_SLOTS.push(`${h}:30`)
+  }
+  // ⭐ 2026-09-20 15:01 奕霖立：per-stylist 独立预约
+  // 每个理发师独立的预约表：{ [stylistName]: { [slot]: customerName } }
+  const [bookedByStylist, setBookedByStylist] = useState<Record<string, Record<string, string>>>({})
+  useEffect(() => {
+    const m: Record<string, Record<string, string>> = { Tony: {}, Amy: {}, Lily: {} }
+    INITIAL_ORDERS.forEach(o => {
+      if (o.status === 'reserved' && o.scheduledDate === dateKey) {
+        if (!m[o.stylistName]) m[o.stylistName] = {}
+        m[o.stylistName][o.scheduledAt] = o.customerName
+      }
+    })
+    setBookedByStylist(m)
+  }, [dateKey])
+
+  async function submit() {
+    setError('')
+    if (!phone || phone.length < 11) { setError('请填写 11 位手机号'); return }
+    if (!timeSlot) { setError('请选择时段'); return }
+    if (!name) { setError('请填写称呼'); return }
+    setSubmitting(true)
+    try {
+      await new Promise((r) => setTimeout(r, 800))
+      const no = 'A' + String(Math.floor(Math.random() * 99) + 1).padStart(3, '0')
+      onSuccess(no)
+    } catch (e: any) {
+      setError(e?.message || '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inputSt: React.CSSProperties = {
+    width: '100%', padding: '10px 12px',
+    background: t.bgDeep,
+    border: `1px solid ${t.border}`,
+    borderRadius: 8, fontSize: 14, color: t.text,
+    outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+  }
+
+  const dateTabs: { key: 'today' | 'tomorrow' | 'dayAfter'; label: string }[] = [
+    { key: 'today', label: '今天' },
+    { key: 'tomorrow', label: '明天' },
+    { key: 'dayAfter', label: '后天' },
+  ]
+
+  // ⭐ 2026-09-20 16:17 奕霖拍板：理发师档案改成 top-2 擅长服务 + 星级
+  const stylists = [
+    { name: 'Tony' as const, emoji: '👨‍🎨', desc: '3年 · 剪发顶 · 造型顶' },
+    { name: 'Amy'  as const, emoji: '👩‍💼', desc: '5年 · 染发顶 · 烫发顶' },
+    { name: 'Lily' as const, emoji: '💁‍♀️', desc: '2年 · 剪发顶 · 烫发好' },
+  ]
+
+  // 当前选中理发师的时段表
+  const currentStylistBooked = bookedByStylist[stylist] || {}
+
+  return (
+    <ModalOverlay t={t} onClose={onClose}>
+      <ModalHeader title="📅 在线预约" onClose={onClose} t={t} />
+      <div style={{ padding: 20, maxHeight: '70vh', overflowY: 'auto' }}>
+        <FormField label="称呼" required t={t}>
+          <input type="text" placeholder="如：李先生 / 王女士"
+            value={name} onChange={(e) => setName(e.target.value)} style={inputSt} />
+        </FormField>
+        <FormField label="手机号" required t={t}>
+          <input type="tel" placeholder="11 位手机号（接收通知）"
+            value={phone} onChange={(e) => setPhone(e.target.value)} style={inputSt} />
+        </FormField>
+
+        <FormField label="选择理发师（每人独立预约）" required t={t}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {stylists.map(s => (
+              <button key={s.name}
+                onClick={() => { setStylist(s.name); setTimeSlot('') }}
+                style={{
+                  flex: 1, padding: '10px 4px',
+                  background: stylist === s.name ? t.primary : t.bgDeep,
+                  color: stylist === s.name ? '#fff' : t.text,
+                  border: `2px solid ${stylist === s.name ? t.primary : t.border}`,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                }}
+              >
+                <span style={{ fontSize: 18 }}>{s.emoji}</span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{s.name}</span>
+                <span style={{ fontSize: 9, opacity: 0.85 }}>{s.desc}</span>
+              </button>
+            ))}
+          </div>
+        </FormField>
+
+        <FormField label="选择日期" required t={t}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {dateTabs.map(tab => (
+              <button key={tab.key}
+                onClick={() => { setDateKey(tab.key); setTimeSlot('') }}
+                style={{
+                  flex: 1, padding: '10px 0',
+                  background: dateKey === tab.key ? t.primary : t.bgDeep,
+                  color: dateKey === tab.key ? '#fff' : t.text,
+                  border: `1px solid ${dateKey === tab.key ? t.primary : t.border}`,
+                  borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >{tab.label}</button>
+            ))}
+          </div>
+        </FormField>
+
+        <FormField label={`${stylist} 的可选时段（半小时一档）`} required t={t}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: 6,
+          }}>
+            {TIME_SLOTS.map(slot => {
+              const booked = currentStylistBooked[slot]
+              const selected = timeSlot === slot
+              return (
+                <button key={slot}
+                  onClick={() => {
+                    if (booked) {
+                      setBookedHint(`${stylist} ${slot} 已被「${booked}」预约，请选其他时段`)
+                      setTimeout(() => setBookedHint(''), 3500)
+                      return
+                    }
+                    setTimeSlot(slot)
+                  }}
+                  style={{
+                    padding: '10px 4px',
+                    background: booked
+                      ? '#f3f4f6'
+                      : selected ? t.primary : t.bgDeep,
+                    color: booked
+                      ? '#9ca3af'
+                      : selected ? '#fff' : t.text,
+                    border: `1px solid ${selected ? t.primary : booked ? '#e5e7eb' : t.border}`,
+                    borderRadius: 8,
+                    fontSize: 12, fontWeight: 600,
+                    fontFamily: 'monospace',
+                    cursor: booked ? 'not-allowed' : 'pointer',
+                    opacity: booked ? 0.65 : 1,
+                    textDecoration: booked ? 'line-through' : 'none',
+                  }}
+                  title={booked ? `已被 ${booked} 预约` : '可预约'}
+                >
+                  <div>{slot}</div>
+                  {booked && (
+                    <div style={{ fontSize: 8, fontWeight: 400, marginTop: 1, fontFamily: 'inherit' }}>
+                      {booked.slice(0, 2)}
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: t.textMuted, marginTop: 8, textAlign: 'center' }}>
+            营业时间 10:00 - 22:00 · 每人独立预约 · 互不影响
+          </div>
+        </FormField>
+
+        {bookedHint && (
+          <div style={{
+            padding: '8px 12px', background: '#fef3c7',
+            border: '1px solid #f59e0b', borderRadius: 8,
+            fontSize: 12, color: '#78350f', marginBottom: 10, textAlign: 'center',
+          }}>⚠️ {bookedHint}</div>
+        )}
+        {error && (
+          <div style={{ fontSize: 13, color: t.accent, marginBottom: 10 }}>{error}</div>
+        )}
+
+        <button onClick={submit} disabled={submitting || !timeSlot} style={{
+          width: '100%', padding: '12px 16px',
+          background: submitting || !timeSlot ? t.textMuted : t.primary,
+          color: '#2c1810', border: 'none', borderRadius: 10,
+          fontSize: 15, fontWeight: 600,
+          cursor: submitting || !timeSlot ? 'not-allowed' : 'pointer',
+          marginTop: 4,
+        }}>
+          {submitting ? '提交中…' : timeSlot ? `✅ 预约 ${stylist} ${timeSlot}` : '请选择时段'}
+        </button>
+        <div style={{ marginTop: 14, fontSize: 12, color: t.textMuted, textAlign: 'center' }}>
+          请提前 5 分钟到店 · 晚到 2 分钟系统自动取消
+        </div>
+      </div>
+    </ModalOverlay>
+  )
+}
+
+// ⭐ 现场取号弹窗
+function TicketModal({ t, onClose, onSuccess }: {
+  t: any; onClose: () => void; onSuccess: (no: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit() {
+    setError('')
+    if (!phone || phone.length < 11) { setError('请填写 11 位手机号'); return }
+    if (!name) { setError('请填写称呼'); return }
+    setSubmitting(true)
+    try {
+      await new Promise((r) => setTimeout(r, 800))
+      const no = 'B' + String(Math.floor(Math.random() * 99) + 1).padStart(3, '0')
+      onSuccess(no)
+    } catch (e: any) {
+      setError(e?.message || '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inputSt: React.CSSProperties = {
+    width: '100%', padding: '10px 12px',
+    background: t.bgDeep,
+    border: `1px solid ${t.border}`,
+    borderRadius: 8, fontSize: 14, color: t.text,
+    outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+  }
+
+  return (
+    <ModalOverlay t={t} onClose={onClose}>
+      <ModalHeader title="🎫 现场取号" onClose={onClose} t={t} />
+      <div style={{ padding: 20 }}>
+        <FormField label="称呼" required t={t}>
+          <input type="text" placeholder="如：李先生 / 王女士"
+            value={name} onChange={(e) => setName(e.target.value)} style={inputSt} />
+        </FormField>
+        <FormField label="手机号" required t={t}>
+          <input type="tel" placeholder="11 位手机号（到号通知）"
+            value={phone} onChange={(e) => setPhone(e.target.value)} style={inputSt} />
+        </FormField>
+        {error && (
+          <div style={{ fontSize: 13, color: t.accent, marginBottom: 10 }}>{error}</div>
+        )}
+        <button onClick={submit} disabled={submitting} style={{
+          width: '100%', padding: '12px 16px',
+          background: submitting ? t.textMuted : t.primary,
+          color: '#2c1810', border: 'none', borderRadius: 10,
+          fontSize: 15, fontWeight: 600,
+          cursor: submitting ? 'not-allowed' : 'pointer',
+          marginTop: 4,
+        }}>
+          {submitting ? '取号中…' : '🎫 立即取号'}
+        </button>
+        <div style={{ marginTop: 14, fontSize: 12, color: t.textMuted, textAlign: 'center' }}>
+          取号后将加入现场排队 · 到号微信通知
+        </div>
+      </div>
+    </ModalOverlay>
+  )
+}
+
+// ⭐ 预约协议弹窗
+function AgreementModal({ t, onClose }: { t: any; onClose: () => void }) {
+  return (
+    <ModalOverlay t={t} onClose={onClose}>
+      <ModalHeader title="📋 预约与排队协议" onClose={onClose} t={t} />
+      <div style={{ padding: 20 }}>
+        <ol style={{ paddingLeft: 20, fontSize: 14, color: t.textSecondary, lineHeight: 1.9, margin: 0 }}>
+          <li style={{ marginBottom: 8 }}>
+            <b style={{ color: t.text }}>提前到店</b>：预约时段请提前 <b style={{ color: t.primary }}>5 分钟</b> 到店，超时未到视为放弃。
+          </li>
+          <li style={{ marginBottom: 8 }}>
+            <b style={{ color: t.text }}>晚到取消</b>：晚到 <b style={{ color: t.accent }}>2 分钟</b> 系统自动取消预约，号源自动释放给现场排队顾客。
+          </li>
+          <li style={{ marginBottom: 8 }}>
+            <b style={{ color: t.text }}>线上预约与线下排队互斥</b>：同一时段预约号优先于现场取号顾客，预约取消后该号源立刻加入线下排队。
+          </li>
+          <li style={{ marginBottom: 8 }}>
+            <b style={{ color: t.text }}>取消规则</b>：请至少提前 30 分钟取消，3 次无故违约将限制后续预约。
+          </li>
+          <li style={{ marginBottom: 8 }}>
+            <b style={{ color: t.text }}>改约规则</b>：可随时取消原预约并重新预约，不计入违约。
+          </li>
+          <li>
+            <b style={{ color: t.text }}>争议处理</b>：如有疑问请到店咨询或拨打商家电话。
+          </li>
+        </ol>
+      </div>
+    </ModalOverlay>
+  )
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '12px 14px',
+  background: 'rgba(245, 234, 211,0.04)',
+  border: `1px solid rgba(${GREEN_RGBA}, 0.15)`,
+  borderRadius: 10,
+  color: '#2c1810',
+  fontSize: 14,
+  outline: 'none',
+  boxSizing: 'border-box',
+}
+
+function Field({ label, required, center, children }: { label: string; required?: boolean; center?: boolean; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', alignItems: center ? 'center' : 'stretch' }}>
+      <span style={{ fontSize: 12, color: 'rgba(44, 24, 16,0.55)', fontWeight: 500, textAlign: center ? 'center' : 'left' }}>
+        {label} {required && <span style={{ color: GREEN }}>*</span>}
+      </span>
+      {children}
+    </label>
+  )
+}
+
+function InfoRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <div style={{
+        fontSize: 16, flexShrink: 0,
+        width: 32, height: 32, borderRadius: 8,
+        background: `rgba(${GREEN_RGBA}, 0.1)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.45)', marginBottom: 2 }}>{label}</div>
+        <div style={{
+          fontSize: 13, color: '#2c1810',
+          wordBreak: 'break-word', lineHeight: 1.5,
+        }}>{value}</div>
+      </div>
+    </div>
+  )
+}
+
+

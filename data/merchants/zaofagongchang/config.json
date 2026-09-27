@@ -1,0 +1,47 @@
+{
+  "id": "zaofagongchang",
+  "name": "造发工场",
+  "slogan": "造型 · 色彩 · 你",
+  "description": "专业造型工场，30 年手艺，从设计到落地一站搞定。",
+  "industry": "barbershop",
+  "theme": {
+    "bgDeep": "#1a0f0a",
+    "bgCard": "#2a1a14",
+    "orange": "#f97316",
+    "orangeDark": "#ea580c",
+    "orangeGlow": "rgba(249, 115, 22, 0.15)",
+    "red": "#dc2626",
+    "redDark": "#b91c1c",
+    "text": "#fef3c7",
+    "textSecondary": "#d6d3d1",
+    "textMuted": "#a8a29e",
+    "glassBorder": "rgba(249, 115, 22, 0.2)",
+    "accent": "#fbbf24"
+  },
+  "contact": {
+    "phone": "0856-1234-5678",
+    "address": "贵州省铜仁市碧江区环北清水大道 88 号",
+    "hours": "周一至周日 10:00-22:00"
+  },
+  "assets": {
+    "logo": "/merchants/zaofagongchang/logo.png",
+    "favicon": "/favicon.ico"
+  },
+  "products": [
+    { "id": "p001", "name": "洗剪吹", "price": 38, "category": "基础服务" },
+    { "id": "p002", "name": "精剪造型", "price": 88, "category": "精剪" },
+    { "id": "p003", "name": "烫发", "price": 280, "category": "烫染" },
+    { "id": "p004", "name": "染发", "price": 360, "category": "烫染" }
+  ],
+  "services": [
+    { "id": "s001", "name": "洗剪吹", "duration": 30, "price": 38 },
+    { "id": "s002", "name": "精剪", "duration": 45, "price": 88 },
+    { "id": "s003", "name": "烫发", "duration": 120, "price": 280 }
+  ],
+  "members": [],
+  "settings": {
+    "queueEnabled": true,
+    "aiConsultant": false,
+    "deliveryAvailable": false
+  }
+}

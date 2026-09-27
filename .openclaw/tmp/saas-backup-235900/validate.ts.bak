@@ -1,0 +1,109 @@
+/**
+ * validate.ts — Day 6 zod 校验层（奕霖 2026-07-25）
+ *
+ * 给 route handler 用的入口校验：
+ *   const v = await validateBody(request, z.object({ phone: z.string().regex(/^1[3-9]\d{9}$/) }))
+ *   if (!v.ok) return v.response  // 自动返 400 + 详细 issues
+ *   const { phone } = v.data      // 类型已推导
+ *
+ * 配 error.ts 用：
+ *   try { ... } catch (e) { return errorResponse(e) }
+ */
+import type { NextRequest } from 'next/server'
+import { z } from 'zod'
+
+export type ValidationOk<T> = { ok: true; data: T }
+export type ValidationFail = { ok: false; response: Response }
+export type ValidationResult<T> = ValidationOk<T> | ValidationFail
+
+/** 把 zod issue 列表转成人类可读一行 */
+function formatIssues(err: z.ZodError): string {
+  // zod 4 issue 结构：{ path: (string|number)[], message: string }
+  return err.issues
+    .map(i => {
+      const path = i.path.length ? i.path.join('.') : 'body'
+      return `${path}: ${i.message}`
+    })
+    .join('；')
+}
+
+/**
+ * 校验 JSON 请求体
+ */
+export async function validateBody<T extends z.ZodTypeAny>(
+  request: Request,
+  schema: T
+): Promise<ValidationResult<z.infer<T>>> {
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return {
+      ok: false,
+      response: Response.json(
+        { success: false, error: '请求体不是合法 JSON', code: 'INVALID_JSON' },
+        { status: 400 }
+      ),
+    }
+  }
+  return validateValue(body, schema)
+}
+
+/**
+ * 校验 URL 查询参数（GET / DELETE）
+ */
+export function validateQuery<T extends z.ZodTypeAny>(
+  request: NextRequest,
+  schema: T
+): ValidationResult<z.infer<T>> {
+  const url = new URL(request.url)
+  const obj: Record<string, string> = {}
+  for (const [k, v] of url.searchParams.entries()) {
+    obj[k] = v
+  }
+  return validateValue(obj, schema)
+}
+
+/**
+ * 校验已 parse 出来的 plain object
+ */
+export function validateValue<T extends z.ZodTypeAny>(
+  value: unknown,
+  schema: T
+): ValidationResult<z.infer<T>> {
+  const parsed = schema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      response: Response.json(
+        {
+          success: false,
+          error: `参数校验失败：${formatIssues(parsed.error)}`,
+          code: 'VALIDATION_ERROR',
+          issues: parsed.error.issues,
+        },
+        { status: 400 }
+      ),
+    }
+  }
+  return { ok: true, data: parsed.data as z.infer<T> }
+}
+
+/**
+ * 常用 schema 片段（直接 z.object({ ... }) 也行，这里集中省得重复写）
+ */
+export const Schemas = {
+  phone: () => z.string().regex(/^1[3-9]\d{9}$/, '手机号格式不正确'),
+  smsCode: () => z.string().regex(/^\d{6}$/, '验证码必须是 6 位数字'),
+  pin: () => z.string().regex(/^\d{4}$/, 'PIN 必须是 4 位数字'),
+  productId: () => z.string().min(1, 'productId 不能为空'),
+  positiveInt: () => z.number().int().positive('必须是正整数'),
+  nonNegativeNumber: () => z.number().nonnegative('不能为负数'),
+  pagination: () => z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(200).default(20),
+  }),
+}
+
+// 重导出 z 让调用方一行 import
+export { z }

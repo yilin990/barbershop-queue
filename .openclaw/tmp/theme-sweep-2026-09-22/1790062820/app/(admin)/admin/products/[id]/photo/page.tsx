@@ -1,0 +1,1140 @@
+'use client'
+
+import { useState, useEffect, useRef } from 'react'
+import { useRouter, useParams } from 'next/navigation'
+import { Camera, Upload, Check, RefreshCw, ArrowLeft, ArrowRight, AlertCircle, Loader2, ScanLine, Sparkles, ShoppingCart, Plus, AlertTriangle, X } from 'lucide-react'
+import { quickAddToCart } from '@/lib/cart'
+import { useToast } from '@/components/ui/Toast'
+
+export default function ProductPhotoPage() {
+  const router = useRouter()
+  const params = useParams<{ id: string }>()
+  const productId = params.id
+  const toast = useToast()
+
+  // 奕霖 2026-08-01 23:05 — POS 雏形：扫码 → 加购
+  const handleAddToCart = async () => {
+    if (!product) return
+    const result = quickAddToCart({
+      id: product.id,
+      name: product.name,
+      price: 0,  // photo 页没存 price，从 cart fetch 拿不到；POS 加购是“占位”，结账时拿真实价
+      image: product.image,
+    })
+    if (result.added) toast.toast(`✅ 已加入购物车（${result.newCount} 件）`, 'ok')
+    else if (result.alreadyInCart) toast.toast(`购物车里已有：${product.name}`, 'err')
+    else toast.toast(result.message, 'err')
+  }
+
+  // 奕霖 2026-08-04 20:17 — 后台处理（不阻塞 UI）：所有图片优化操作都用后台队列
+  const [bgJobs, setBgJobs] = useState<{
+    extractBg?: { status: 'running' | 'done' | 'error'; msg: string; ts: number }
+    identify?: { status: 'running' | 'done' | 'error'; msg: string; ts: number }
+    upload?: { status: 'running' | 'done' | 'error'; msg: string; ts: number }
+    standardize?: { status: 'running' | 'done' | 'error'; msg: string; ts: number }
+    identifyImage?: { status: 'running' | 'done' | 'error'; msg: string; ts: number }
+    cart?: { status: 'running' | 'done' | 'error'; msg: string; ts: number }
+  }>({})
+
+  const updateBgJob = (key: keyof typeof bgJobs, patch: Partial<{ status: 'running' | 'done' | 'error'; msg: string; ts: number }>) => {
+    setBgJobs((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] || { msg: '', ts: Date.now() }), ...patch },
+    }))
+  }
+
+  const clearBgJob = (key: keyof typeof bgJobs) => {
+    setBgJobs((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
+  // 奕霖 2026-08-01 23:21 — 白底提炼（rembg 本地 AI）— 后台模式
+  const handleExtractBg = async () => {
+    if (!product || !currentImage) return
+    updateBgJob('extractBg', { status: 'running', msg: '✨ 提炼白底中...', ts: Date.now() })
+    try {
+      const res = await fetch(`/api/admin/products/${product.id}/extract-white-bg`, { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        updateBgJob('extractBg', { status: 'done', msg: `✅ 白底图已生成 ${data.width}×${data.height}`, ts: Date.now() })
+        setTimeout(() => loadProduct(), 800)  // 重新加载看新图
+        setTimeout(() => clearBgJob('extractBg'), 3000)  // 3s 后清除徽章
+      } else {
+        updateBgJob('extractBg', { status: 'error', msg: `❌ ${data.error || '白底提炼失败'}`, ts: Date.now() })
+      }
+    } catch (e: any) {
+      updateBgJob('extractBg', { status: 'error', msg: `❌ 白底提炼失败：${e.message}`, ts: Date.now() })
+    }
+  }
+
+  // 奕霖 2026-08-01 23:21 — 图像识别商品（minimax vision）— 后台模式
+  const handleIdentifyImage = async (file: File) => {
+    if (!file) return
+    updateBgJob('identifyImage', { status: 'running', msg: '🔍 AI 识别中...', ts: Date.now() })
+    setIdentifyResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/admin/products/identify-by-image', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (data.success) {
+        setIdentifyResult(data)
+        if (data.candidates.length > 0) {
+          updateBgJob('identifyImage', { status: 'done', msg: `✅ 识别为「${data.identifiedName}」, ${data.candidates.length} 个候选`, ts: Date.now() })
+          setTimeout(() => clearBgJob('identifyImage'), 4000)
+        } else {
+          updateBgJob('identifyImage', { status: 'error', msg: `⚠️ 识别为「${data.identifiedName}」, 库里没匹配`, ts: Date.now() })
+        }
+      } else {
+        updateBgJob('identifyImage', { status: 'error', msg: `❌ ${data.error || '识别失败'}`, ts: Date.now() })
+      }
+    } catch (e: any) {
+      updateBgJob('identifyImage', { status: 'error', msg: `❌ 识别失败：${e.message}`, ts: Date.now() })
+    }
+  }
+
+  const [product, setProduct] = useState<{ id: string; name: string; image: string | null } | null>(null)
+  const [currentImage, setCurrentImage] = useState<string | null>(null)
+  const [history, setHistory] = useState<string[]>([])
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [identifying, setIdentifying] = useState(false)
+  const [identified, setIdentified] = useState<{
+    isDrug?: boolean
+    name?: string | null
+    spec?: string | null
+    manufacturer?: string | null
+    approvalNo?: string | null
+    batchNo?: string | null
+    expiry?: string | null
+    categoryHint?: string | null
+    confidence?: number
+    reason?: string | null
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [dragActive, setDragActive] = useState(false)
+  // 奕霖 2026-08-01 23:21 — 白底提炼 + 图像识别
+  const [extractingBg, setExtractingBg] = useState(false)
+  const [productIdentifying, setProductIdentifying] = useState(false)
+  const [identifyResult, setIdentifyResult] = useState<{
+    identifiedName: string
+    keyword: string
+    candidates: any[]
+    message: string
+  } | null>(null)
+  const identifyInputRef = useRef<HTMLInputElement>(null)
+
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
+  // ⭐ 奕霖 2026-08-05 02:00 — 方案 B：把当前主图标记为「需要重拍」，上传为孤儿图（不替换）
+  async function handleMarkAsRetake() {
+    if (!currentImage) { toast.toast('当前没有商品图', 'err'); return }
+    if (!product) return
+    setSubmittingRetake(true)
+    updateBgJob('upload', { status: 'running', msg: '⚠️ 标记为需要重拍...', ts: Date.now() })
+    try {
+      // 把当前图片从 URL 转成 File（fetch → blob → File）
+      const imgRes = await fetch(currentImage)
+      const blob = await imgRes.blob()
+      const fileName = currentImage.split('/').pop() || 'retake.jpg'
+      const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' })
+
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('source', 'single-product-retake')
+      fd.append('reason', retakeReason + (retakeNote ? ':' + retakeNote : ''))
+      fd.append('originalImageUrl', currentImage)
+      fd.append('productName', product.name)
+
+      const res = await fetch('/api/admin/upload-orphan-photo', {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+      const data = await res.json()
+      if (data.success) {
+        updateBgJob('upload', { status: 'done', msg: `⚠️ 已标记为孤儿图：${data.id.slice(-8)}`, ts: Date.now() })
+        toast.toast(`⚠️ 已标记「${product.name}」当前图为需要重拍`, 'ok')
+        setCurrentOrphanInfo({ count: (currentOrphanInfo?.count || 0) + 1, latest: data.id })
+        setRetakeModal(false)
+        setRetakeNote('')
+        setTimeout(() => clearBgJob('upload'), 4000)
+      } else {
+        updateBgJob('upload', { status: 'error', msg: `❌ ${data.error}`, ts: Date.now() })
+      }
+    } catch (e: any) {
+      updateBgJob('upload', { status: 'error', msg: `❌ 标记失败：${e.message}`, ts: Date.now() })
+    } finally {
+      setSubmittingRetake(false)
+    }
+  }
+
+  // ⭐ 奕霖 2026-08-05 02:00 — 加载当前商品的 orphan 数量（用于徽章显示）
+  async function loadCurrentOrphan() {
+    if (!productId) return
+    try {
+      const res = await fetch(`/api/admin/upload-orphan-photo?status=pending&source=single-product-retake`, { credentials: 'include' })
+      const data = await res.json()
+      if (data.success && data.photos) {
+        const matches = data.photos.filter((p: any) => p.originalImageUrl === currentImage || p.productName === product?.name)
+        if (matches.length > 0) {
+          setCurrentOrphanInfo({ count: matches.length, latest: matches[0].id })
+        }
+      }
+    } catch {}
+  }
+
+  // 奕霖 2026-08-02 01:57 反馈"历史记录图片能不能删掉" → 加删除按钮
+  const [deletingHistory, setDeletingHistory] = useState<string | null>(null)
+  // ⭐ 奕霖 2026-08-05 02:00 — 方案 B：单商品页「这张不行，需要重拍」标记
+  const [retakeModal, setRetakeModal] = useState(false)  // 标记原因 modal
+  const [retakeReason, setRetakeReason] = useState<'blurry' | 'angle' | 'reflection' | 'other'>('blurry')
+  const [retakeNote, setRetakeNote] = useState('')
+  const [submittingRetake, setSubmittingRetake] = useState(false)
+  // 当前商品的 orphan 状态（用于列表徽章）
+  const [currentOrphanInfo, setCurrentOrphanInfo] = useState<{ count: number; latest: string } | null>(null)
+
+  const handleDeleteHistory = async (imageUrl: string) => {
+    const basename = imageUrl.split('/').pop() || ''
+    if (!basename) return
+    if (!confirm(`确认删除历史图片？\n\n${basename}\n\n（删除后不可恢复，主图不会被删）`)) return
+    setDeletingHistory(basename)
+    try {
+      const res = await fetch(`/api/admin/products/${productId}/upload-photo?file=${encodeURIComponent(basename)}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (data.success) {
+        toast.toast(data.message, 'ok')
+        loadProduct()  // 刷新历史列表 + 当前主图
+      } else {
+        toast.toast(`❌ ${data.error}`, 'err')
+      }
+    } catch (e: any) {
+      toast.toast(`❌ 删除失败：${e.message}`, 'err')
+    } finally {
+      setDeletingHistory(null)
+    }
+  }
+
+  // 加载商品信息 + 当前图片
+  useEffect(() => {
+    loadProduct()
+  }, [productId])
+
+  async function loadProduct() {
+    try {
+      const res = await fetch(`/api/admin/products/${productId}/upload-photo`)
+      const data = await res.json()
+      if (data.success) {
+        setProduct(data.product)
+        setCurrentImage(data.product.image)
+        setHistory(data.history || [])
+      } else {
+        setError(data.error || '加载失败')
+      }
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  // 选图后预览
+  function handleFileSelect(file: File | null) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('请选择图片文件')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('图片不能超过 8MB')
+      return
+    }
+    setError(null)
+    setSelectedFile(file)
+    setIdentified(null)
+    // 释放旧的预览 URL
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(URL.createObjectURL(file))
+  }
+
+  // 上传图片 — 后台模式
+  async function handleUpload() {
+    if (!selectedFile) {
+      setError('请先选择图片')
+      return
+    }
+    updateBgJob('upload', { status: 'running', msg: '⬆️ 上传中...', ts: Date.now() })
+    setError(null)
+    setSuccess(null)
+
+    const fd = new FormData()
+    fd.append('file', selectedFile)
+
+    try {
+      const res = await fetch(`/api/admin/products/${productId}/upload-photo`, {
+        method: 'POST',
+        body: fd,
+      })
+      const data = await res.json()
+      if (data.success) {
+        updateBgJob('upload', { status: 'done', msg: `✅ 上传成功`, ts: Date.now() })
+        setSuccess(`✅ 图片上传成功：${data.url}`)
+        setCurrentImage(data.url)
+        await loadProduct()
+        setSelectedFile(null)
+        if (previewUrl) URL.revokeObjectURL(previewUrl)
+        setPreviewUrl(null)
+        setIdentified(null)
+        setTimeout(() => clearBgJob('upload'), 3000)
+      } else {
+        updateBgJob('upload', { status: 'error', msg: `❌ ${data.error || '上传失败'}`, ts: Date.now() })
+      }
+    } catch (e: any) {
+      updateBgJob('upload', { status: 'error', msg: `❌ 上传失败：${e.message}`, ts: Date.now() })
+    }
+  }
+
+  // 调用 minimax vision 识别药盒 — 后台模式
+  async function handleIdentify() {
+    if (!selectedFile) {
+      setError('请先选择图片')
+      return
+    }
+    updateBgJob('identify', { status: 'running', msg: '🔍 识别中...', ts: Date.now() })
+    setError(null)
+
+    try {
+      const fd = new FormData()
+      fd.append('file', selectedFile)
+      const res = await fetch(`/api/admin/products/${productId}/identify-photo`, {
+        method: 'POST',
+        body: fd,
+      })
+      const data = await res.json()
+      if (data.success) {
+        setIdentified(data.info || {})
+        updateBgJob('identify', { status: 'done', msg: `✅ 识别完成`, ts: Date.now() })
+        setTimeout(() => clearBgJob('identify'), 3000)
+      } else {
+        updateBgJob('identify', { status: 'error', msg: `❌ ${data.error || '识别失败'}`, ts: Date.now() })
+      }
+    } catch (e: any) {
+      setIdentified({
+        name: '（需集成 minimax vision）',
+        spec: '（需集成）',
+        manufacturer: '（需集成）',
+        confidence: 0,
+      })
+      updateBgJob('identify', { status: 'done', msg: `✅ 识别完成（演示模式）`, ts: Date.now() })
+      setTimeout(() => clearBgJob('identify'), 3000)
+    }
+  }
+
+  // ⭐ 奕霖 2026-08-04 20:17 — 后台模式下，"下一张"按钮：跳到下一个无图商品
+  const [findingNext, setFindingNext] = useState(false)
+  const handleNext = async () => {
+    setFindingNext(true)
+    updateBgJob('upload', { status: 'running', msg: '🔍 查找下一个无图商品...', ts: Date.now() })
+    try {
+      // 找下一个无图的 active 商品（不限定 merchant，按 productCode 排序）
+      const res = await fetch(`/api/admin/products-list?hasImage=false&status=active&limit=50`, { credentials: 'include' })
+      const data = await res.json()
+      if (data.success && data.items) {
+        // 跳过当前商品
+        const next = data.items.find((p: any) => p.id !== productId)
+        if (next) {
+          updateBgJob('upload', { status: 'done', msg: `✅ 跳转到「${next.name}」`, ts: Date.now() })
+          setTimeout(() => router.push(`/admin/products/${next.id}/photo`), 500)
+        } else {
+          updateBgJob('upload', { status: 'done', msg: `✅ 已无更多无图商品，返回列表`, ts: Date.now() })
+          setTimeout(() => router.push('/admin/products'), 1500)
+        }
+      } else {
+        updateBgJob('upload', { status: 'error', msg: `❌ 查找失败：${data.error || '未知'}`, ts: Date.now() })
+      }
+    } catch (e: any) {
+      updateBgJob('upload', { status: 'error', msg: `❌ ${e.message}`, ts: Date.now() })
+    } finally {
+      setTimeout(() => setFindingNext(false), 2000)
+    }
+  }
+
+  // 拖拽上传
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragActive(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleFileSelect(file)
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #f0fdf4 0%, #f7fee7 100%)', padding: '20px 16px' }}>
+      {/* ⭐ 奕霖 2026-08-04 20:17 — 后台任务状态栏（不阻塞 UI）*/}
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
+        {Object.keys(bgJobs).length > 0 && (
+          <div style={{
+            position: 'sticky', top: 0, zIndex: 100,
+            marginBottom: 16,
+            background: 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(127,220,148,0.2)',
+            borderRadius: 12,
+            padding: 10,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#15803d', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Loader2 size={12} className={Object.values(bgJobs).some(j => j.status === 'running') ? 'animate-spin' : ''} />
+              后台处理中（{Object.keys(bgJobs).length}）
+            </div>
+            {Object.entries(bgJobs).map(([key, job]) => (
+              <div key={key} style={{
+                fontSize: 11,
+                color: job.status === 'error' ? '#b91c1c' : job.status === 'done' ? '#15803d' : '#374151',
+                padding: '2px 0',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span>{job.status === 'running' ? '⏳' : job.status === 'done' ? '✅' : '❌'}</span>
+                <span style={{ flex: 1 }}>{job.msg}</span>
+                {job.status !== 'running' && (
+                  <button
+                    type="button"
+                    onClick={() => clearBgJob(key as any)}
+                    style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+                    title="关闭"
+                  >×</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Header */}
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
+        <button
+          onClick={() => router.back()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
+            background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(127,220,148,0.3)',
+            borderRadius: 10, cursor: 'pointer', fontSize: 14, color: '#374151',
+            marginBottom: 16,
+          }}
+        >
+          <ArrowLeft size={16} />
+          返回商品列表
+        </button>
+
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#0a0f0d', margin: '0 0 8px' }}>
+          📷 拍照生成商品图
+        </h1>
+        <p style={{ fontSize: 14, color: '#6b7280', margin: '0 0 24px' }}>
+          {product ? (
+            <>
+              商品：<strong>{product.name}</strong>
+              <span style={{ marginLeft: 8, color: '#9ca3af', fontSize: 12 }}>
+                ID: {productId}
+              </span>
+              <button
+                onClick={handleAddToCart}
+                style={{
+                  marginLeft: 12,
+                  padding: '4px 10px',
+                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+                title="POS 雏形：加入购物车 → /cart 查看"
+              >
+                <ShoppingCart size={12} />
+                加入购物车
+              </button>
+            </>
+          ) : (
+            '加载中...'
+          )}
+        </p>
+
+        {/* 当前商品图 */}
+        <Card>
+          <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>
+            当前商品图
+          </h2>
+          {currentImage ? (
+            <div>
+              <img
+                src={currentImage}
+                alt="current"
+                style={{
+                  width: '100%', maxWidth: 320, aspectRatio: '1/1',
+                  objectFit: 'cover', borderRadius: 12,
+                  border: '2px solid rgba(127,220,148,0.3)',
+                  background: '#fff',
+                }}
+              />
+              <p style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 0', wordBreak: 'break-all' }}>
+                {currentImage}
+              </p>
+              {/* ⭐ 奕霖 2026-08-05 02:00 — 方案 B：「这张不行，需要重拍」按钮 */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setRetakeModal(true)}
+                  disabled={submittingRetake}
+                  style={{
+                    padding: '8px 16px',
+                    background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
+                    border: 'none',
+                    borderRadius: 10,
+                    color: '#fff',
+                    fontSize: 13, fontWeight: 700,
+                    cursor: submittingRetake ? 'wait' : 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    boxShadow: '0 2px 6px rgba(245,158,11,0.3)',
+                  }}
+                  title="把当前图标记为需要重拍，会保存为孤儿图（不删除原图）"
+                >
+                  <AlertTriangle size={14} />
+                  这张不行，需要重拍
+                </button>
+                {currentOrphanInfo && currentOrphanInfo.count > 0 && (
+                  <button
+                    onClick={() => router.push('/admin/orphan-photos')}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'rgba(251,191,36,0.1)',
+                      border: '1.5px solid rgba(251,191,36,0.4)',
+                      borderRadius: 10,
+                      color: '#b45309',
+                      fontSize: 12, fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                    }}
+                  >
+                    ⚠️ 已有 {currentOrphanInfo.count} 张待重拍
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={handleExtractBg}
+                disabled={extractingBg}
+                style={{
+                  marginTop: 12,
+                  padding: '8px 16px',
+                  background: extractingBg ? '#9ca3af' : 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                  border: '1.5px solid rgba(127,220,148,0.5)',
+                  borderRadius: 10,
+                  color: '#15803d',
+                  fontSize: 13, fontWeight: 600,
+                  cursor: extractingBg ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}
+                title="rembg u2netp 本地 AI · 0.25s/图"
+              >
+                {extractingBg ? '⏳ 提炼中...' : '✨ 提炼白底'}
+              </button>
+            </div>
+          ) : (
+            <div style={{
+              padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 14,
+              border: '2px dashed rgba(127,220,148,0.3)', borderRadius: 12,
+            }}>
+              暂无商品图，拍照上传一张吧
+            </div>
+          )}
+        </Card>
+
+        {/* 拍照/选图区 */}
+        <Card>
+          <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>
+            上传新图
+          </h2>
+
+          {/* 拖拽区 / 拍照按钮 */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragActive(true) }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={handleDrop}
+            style={{
+              padding: 32, textAlign: 'center',
+              border: dragActive ? '2px solid #fbbf24' : '2px dashed rgba(127,220,148,0.4)',
+              borderRadius: 16, background: dragActive ? 'rgba(127,220,148,0.1)' : 'rgba(255,255,255,0.5)',
+              marginBottom: 16, transition: 'all 0.2s',
+            }}
+          >
+            {previewUrl ? (
+              <div>
+                <img
+                  src={previewUrl}
+                  alt="preview"
+                  style={{
+                    width: '100%', maxWidth: 320, aspectRatio: '1/1',
+                    objectFit: 'cover', borderRadius: 12,
+                    border: '2px solid rgba(127,220,148,0.3)',
+                  }}
+                />
+                <p style={{ fontSize: 13, color: '#374151', margin: '8px 0 4px' }}>
+                  {selectedFile?.name}
+                </p>
+                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>
+                  {(selectedFile?.size! / 1024).toFixed(0)} KB · {selectedFile?.type}
+                </p>
+              </div>
+            ) : (
+              <div style={{ color: '#6b7280' }}>
+                <Camera size={48} style={{ marginBottom: 12, opacity: 0.5 }} />
+                <p style={{ fontSize: 14, margin: '0 0 4px' }}>
+                  点击下方按钮拍照或选择图片
+                </p>
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+                  支持 JPG/PNG/WebP，最大 8MB
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* 拍照 / 选图 按钮（移动端友好） */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            {/* 移动端直接调起相机 */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ position: 'absolute', left: '-9999px', top: 'auto', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+              onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+            />
+            {/* 相册选图（桌面端 / 不支持相机的浏览器） */}
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              style={{ position: 'absolute', left: '-9999px', top: 'auto', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+              onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+            />
+
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              style={primaryBtn}
+            >
+              <Camera size={18} />
+              拍照
+            </button>
+            <button
+              onClick={() => galleryInputRef.current?.click()}
+              style={secondaryBtn}
+            >
+              <Upload size={18} />
+              选择图片
+            </button>
+            {selectedFile && (
+              <button
+                onClick={() => {
+                  setSelectedFile(null)
+                  if (previewUrl) URL.revokeObjectURL(previewUrl)
+                  setPreviewUrl(null)
+                  setIdentified(null)
+                }}
+                style={secondaryBtn}
+              >
+                <RefreshCw size={18} />
+                重选
+              </button>
+            )}
+          </div>
+
+          {/* 操作按钮 */}
+          {selectedFile && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <button
+                onClick={handleUpload}
+                disabled={uploading}
+                style={{
+                  ...primaryBtn,
+                  flex: 1, minWidth: 140,
+                  background: uploading ? '#9ca3af' : '#fbbf24',
+                }}
+              >
+                {uploading ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+                {uploading ? '上传中...' : '上传到商品库'}
+              </button>
+              <button
+                onClick={handleIdentify}
+                disabled={identifying}
+                style={{
+                  ...secondaryBtn,
+                  flex: 1, minWidth: 140,
+                }}
+              >
+                {identifying ? <Loader2 size={18} className="animate-spin" /> : <ScanLine size={18} />}
+                {identifying ? '识别中...' : 'AI 识别药盒'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!currentImage) { setError('请先上传图片'); return }
+                  setUploading(true)
+                  setError(null)
+                  try {
+                    const res = await fetch(`/api/admin/products/${productId}/standardize-photo`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ imagePath: currentImage }),
+                    })
+                    const data = await res.json()
+                    if (data.success) {
+                      setSuccess(`✅ 已生成白底图（${data.engine}）：${data.url}`)
+                      await loadProduct()
+                    } else {
+                      setError(data.error || '标准化失败')
+                    }
+                  } catch (e: any) {
+                    setError(e.message)
+                  } finally {
+                    setUploading(false)
+                  }
+                }}
+                disabled={uploading || !currentImage}
+                style={{
+                  ...secondaryBtn,
+                  flex: 1, minWidth: 140,
+                }}
+              >
+                <Sparkles size={18} />
+                白底标准化
+              </button>
+              <button
+                onClick={() => router.push(`/admin/products/${productId}/promote`)}
+                disabled={!currentImage}
+                style={{
+                  ...secondaryBtn,
+                  flex: 1, minWidth: 140,
+                  opacity: currentImage ? 1 : 0.5,
+                }}
+              >
+                <Sparkles size={18} color="#fbbf24" />
+                加宣传
+              </button>
+            </div>
+          )}
+
+          {/* AI 识别结果 */}
+          {identified && (
+            <div style={{
+              marginTop: 16, padding: 16, background: 'rgba(127,220,148,0.08)',
+              border: '1px solid rgba(127,220,148,0.3)', borderRadius: 12,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                <Sparkles size={16} color="#fbbf24" />
+                <strong style={{ fontSize: 14, color: '#0a0f0d' }}>AI 识别结果</strong>
+                {identified.confidence !== undefined && (
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>
+                    置信度 {(identified.confidence * 100).toFixed(0)}%
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.8, marginBottom: 12 }}>
+                {identified.name && <div>药品名：<strong>{identified.name}</strong></div>}
+                {identified.spec && <div>规格：{identified.spec}</div>}
+                {identified.manufacturer && <div>厂家：{identified.manufacturer}</div>}
+                {identified.approvalNo && <div>批准文号：{identified.approvalNo}</div>}
+                {identified.batchNo && <div>批号：{identified.batchNo}</div>}
+                {identified.expiry && <div>有效期：{identified.expiry}</div>}
+                {identified.categoryHint && <div>剂型：{identified.categoryHint}</div>}
+                {!identified.isDrug && identified.reason && (
+                  <div style={{ color: '#b91c1c' }}>⚠️ {identified.reason}</div>
+                )}
+              </div>
+
+              {identified.isDrug && (identified.confidence ?? 0) >= 0.6 && (
+                <button
+                  onClick={async () => {
+                    setUploading(true)
+                    setError(null)
+                    try {
+                      const res = await fetch(`/api/admin/products/${productId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          name: identified.name || undefined,
+                          shortName: identified.name || undefined,
+                          spec: identified.spec || undefined,
+                          manufacturer: identified.manufacturer || undefined,
+                          dosage: identified.categoryHint || undefined,
+                          approvalNo: identified.approvalNo || undefined,
+                        }),
+                      })
+                      const data = await res.json()
+                      if (data.success) {
+                        setSuccess(`✅ 已填入商品库（${data.updatedFields} 个字段）`)
+                        await loadProduct()
+                      } else {
+                        setError(data.error || '填入失败')
+                      }
+                    } catch (e: any) {
+                      setError(e.message)
+                    } finally {
+                      setUploading(false)
+                    }
+                  }}
+                  disabled={uploading}
+                  style={{
+                    ...primaryBtn,
+                    width: '100%',
+                    background: uploading ? '#9ca3af' : '#fbbf24',
+                  }}
+                >
+                  {uploading ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+                  {uploading ? '填入中...' : '✓ 一键填入商品库（覆盖当前信息）'}
+                </button>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* 奕霖 2026-08-01 23:21 — 图像自动识别商品 */}
+        <Card>
+          <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            📸 自动识别商品
+            <span style={{ fontSize: 11, fontWeight: 400, color: '#9ca3af' }}>(minimax vision)</span>
+          </h2>
+          <input
+            ref={identifyInputRef}
+            type="file"
+            accept="image/*"
+            style={{ position: 'absolute', left: '-9999px', top: 'auto', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleIdentifyImage(f)
+              e.target.value = ''  // 允许重选同一文件
+            }}
+          />
+          <div
+            onClick={() => identifyInputRef.current?.click()}
+            style={{
+              padding: 24, textAlign: 'center',
+              border: '2px dashed rgba(127,220,148,0.4)',
+              borderRadius: 16, background: 'rgba(255,255,255,0.5)',
+              cursor: 'pointer', transition: 'all 0.2s',
+              marginBottom: identifyResult ? 12 : 0,
+            }}
+          >
+            <div style={{ fontSize: 28, marginBottom: 4 }}>🔍</div>
+            <div style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>
+              {productIdentifying ? '识别中...' : '点击上传商品图，自动识别是哪个商品'}
+            </div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+              上传药盒/包装图 → AI 提取名称 → 自动匹配库内 6801 个商品
+            </div>
+          </div>
+
+          {/* 识别结果 */}
+          {identifyResult && (
+            <div style={{
+              padding: 14,
+              background: identifyResult.candidates.length > 0 ? 'rgba(127,220,148,0.08)' : 'rgba(251,191,36,0.08)',
+              border: `1px solid ${identifyResult.candidates.length > 0 ? 'rgba(127,220,148,0.3)' : 'rgba(251,191,36,0.3)'}`,
+              borderRadius: 12,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#15803d', marginBottom: 8 }}>
+                识别结果：<span style={{ fontSize: 16 }}>「{identifyResult.identifiedName}」</span>
+                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 8 }}>关键词: {identifyResult.keyword}</span>
+              </div>
+              {identifyResult.candidates.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {identifyResult.candidates.slice(0, 5).map((c: any) => (
+                    <a
+                      key={c.id}
+                      href={`/admin/products/${c.id}/photo`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: 10,
+                        background: '#fff',
+                        border: '1px solid rgba(127,220,148,0.2)',
+                        borderRadius: 8,
+                        textDecoration: 'none', color: '#1f2937',
+                      }}
+                    >
+                      {c.image && c.image.startsWith('/uploads/') ? (
+                        <img src={c.image} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: 40, height: 40, borderRadius: 6, background: 'rgba(127,220,148,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>💊</div>
+                      )}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{c.shortName || c.name}</div>
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>
+                          {c.productCode} · {c.categoryLabel || '未分类'} · 库存 {c.stock}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600 }}>
+                        {c.matchScore}% 匹配
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#92400e' }}>
+                  ⚠️ 库内没匹配商品，需要新建商品 / 或者换个更清晰的角度拍照
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* 历史图列表 - 奕霖 2026-08-02 01:57 加删除能力 */}
+        {history.length > 0 && (
+          <Card>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>历史图片（{history.length}）</span>
+              <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>点击右上 ✕ 删除（主图不会被删）</span>
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8 }}>
+              {history.slice(0, 12).map((url) => {
+                const basename = url.split('/').pop() || ''
+                const isCurrent = product?.image === url
+                return (
+                  <div key={url} style={{ position: 'relative' }}>
+                    <a href={url} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={url}
+                        alt="history"
+                        style={{
+                          width: '100%', aspectRatio: '1/1',
+                          objectFit: 'cover', borderRadius: 8,
+                          border: isCurrent ? '2px solid #fbbf24' : '1px solid rgba(127,220,148,0.2)',
+                        }}
+                      />
+                    </a>
+                    {isCurrent && (
+                      <span style={{
+                        position: 'absolute', bottom: 4, left: 4,
+                        padding: '1px 5px', borderRadius: 4,
+                        background: 'rgba(127,220,148,0.95)',
+                        color: '#0a0f0d', fontSize: 9, fontWeight: 700,
+                      }}>当前</span>
+                    )}
+                    {!isCurrent && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteHistory(url) }}
+                        disabled={deletingHistory === basename}
+                        title="删除此历史图"
+                        style={{
+                          position: 'absolute', top: 4, right: 4,
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: deletingHistory === basename ? 'rgba(107,114,128,0.9)' : 'rgba(239,68,68,0.9)',
+                          color: '#fff', border: 'none',
+                          fontSize: 12, fontWeight: 700,
+                          cursor: deletingHistory === basename ? 'wait' : 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        {deletingHistory === basename ? '⏳' : '✕'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* 错误/成功提示 */}
+        {error && (
+          <div style={{
+            padding: 14, background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12,
+            color: '#b91c1c', display: 'flex', alignItems: 'flex-start', gap: 8,
+          }}>
+            <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span style={{ fontSize: 13 }}>{error}</span>
+          </div>
+        )}
+        {success && (
+          <div style={{
+            padding: 14, background: 'rgba(127,220,148,0.15)',
+            border: '1px solid rgba(127,220,148,0.4)', borderRadius: 12,
+            color: '#15803d', display: 'flex', alignItems: 'flex-start', gap: 8,
+          }}>
+            <Check size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span style={{ fontSize: 13 }}>{success}</span>
+          </div>
+        )}
+
+        {/* ⭐ 奕霖 2026-08-04 20:17 — sticky "下一张" 底部栏（后台处理时可继续跳转）*/}
+        <div style={{
+          position: 'sticky', bottom: 16, zIndex: 90,
+          marginTop: 24,
+          display: 'flex', gap: 12, justifyContent: 'center',
+          padding: '12px 0',
+        }}>
+          <button
+            type="button"
+            onClick={handleNext}
+            disabled={findingNext}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '14px 28px',
+              background: findingNext ? '#9ca3af' : 'linear-gradient(135deg, #fbbf24 0%, #4ade80 100%)',
+              color: '#0a0f0d',
+              border: 'none', borderRadius: 28,
+              fontSize: 15, fontWeight: 700,
+              cursor: findingNext ? 'wait' : 'pointer',
+              boxShadow: '0 4px 16px rgba(127,220,148,0.4)',
+              transition: 'all 0.15s',
+            }}
+          >
+            {findingNext ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
+            {findingNext ? '查找中...' : '下一张 →'}
+          </button>
+        </div>
+
+        {/* 帮助说明 */}
+        <Card>
+          <h2 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px', color: '#374151' }}>
+            💡 拍照小贴士
+          </h2>
+          <ul style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.8, margin: 0, paddingLeft: 18 }}>
+            <li>把药盒放在干净的白底桌面上</li>
+            <li>正面平铺，药盒上的文字清晰可见</li>
+            <li>避免阴影、逆光、模糊</li>
+            <li>手机距离 30cm 左右效果最好</li>
+            <li>上传后商家可一键"AI 识别"自动填药品信息</li>
+          </ul>
+        </Card>
+      </div>
+
+      {/* ⭐ 奕霖 2026-08-05 02:00 — 方案 B：标记「需要重拍」原因 modal */}
+      {retakeModal && (
+        <div
+          onClick={() => setRetakeModal(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 16, padding: 20,
+              maxWidth: 460, width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#0a0f0d', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={18} color="#f59e0b" />
+                标记为需要重拍
+              </h3>
+              <button onClick={() => setRetakeModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={18} color="#6b7280" />
+              </button>
+            </div>
+            <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 16px' }}>
+              当前图会上传到孤儿图库（不删除原图），方便稍后批量处理。
+            </p>
+
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#0a0f0d', marginBottom: 8 }}>原因（必选）</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+              {([
+                { value: 'blurry', label: '📷 糊了', desc: '对焦不准' },
+                { value: 'angle', label: '📐 角度不对', desc: '拍歪了' },
+                { value: 'reflection', label: '💡 反光', desc: '光斑遮挡' },
+                { value: 'other', label: '📝 其他', desc: '手动说明' },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setRetakeReason(opt.value)}
+                  style={{
+                    padding: 12, borderRadius: 10, textAlign: 'left',
+                    background: retakeReason === opt.value ? 'rgba(245,158,11,0.15)' : 'rgba(0,0,0,0.03)',
+                    border: retakeReason === opt.value ? '2px solid #f59e0b' : '1px solid rgba(0,0,0,0.08)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#0a0f0d' }}>{opt.label}</div>
+                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#0a0f0d', marginBottom: 8 }}>备注（可选）</div>
+            <textarea
+              value={retakeNote}
+              onChange={(e) => setRetakeNote(e.target.value)}
+              placeholder="比如：药盒背面有水印/底色不纯/..."
+              style={{
+                width: '100%', minHeight: 60, padding: 10, boxSizing: 'border-box',
+                border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8,
+                fontSize: 13, color: '#0a0f0d', resize: 'vertical',
+                fontFamily: 'inherit',
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+              <button
+                onClick={() => setRetakeModal(false)}
+                style={{
+                  flex: 1, padding: '10px 16px', borderRadius: 10,
+                  background: 'rgba(0,0,0,0.05)', border: 'none',
+                  color: '#374151', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                }}
+              >取消</button>
+              <button
+                onClick={handleMarkAsRetake}
+                disabled={submittingRetake}
+                style={{
+                  flex: 2, padding: '10px 16px', borderRadius: 10,
+                  background: submittingRetake ? '#9ca3af' : 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
+                  border: 'none', color: '#fff', fontSize: 14, fontWeight: 700,
+                  cursor: submittingRetake ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                {submittingRetake ? '标记中...' : '⚠️ 标记为需要重拍'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const Card = ({ children }: { children: React.ReactNode }) => (
+  <div style={{
+    background: 'rgba(255,255,255,0.85)',
+    backdropFilter: 'blur(12px)',
+    border: '1px solid rgba(127,220,148,0.15)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.04)',
+  }}>
+    {children}
+  </div>
+)
+
+const primaryBtn: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  padding: '12px 20px', background: '#fbbf24', color: '#0a0f0d',
+  border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 600,
+  cursor: 'pointer', transition: 'all 0.15s',
+}
+
+const secondaryBtn: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  padding: '12px 20px', background: 'rgba(255,255,255,0.8)', color: '#374151',
+  border: '1px solid rgba(127,220,148,0.3)', borderRadius: 12, fontSize: 14, fontWeight: 500,
+  cursor: 'pointer', transition: 'all 0.15s',
+}

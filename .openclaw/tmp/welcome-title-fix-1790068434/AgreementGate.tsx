@@ -1,0 +1,509 @@
+'use client'
+
+/**
+ * AgreementGate - 首次登录强制协议确认（奕霖 2026-07-06 13:37 决定）
+ *
+ * 触发条件：complianceStore.agreedAt === null 或版本号变化
+ * 通过条件：勾选 3 个 checkbox 后才能点"同意并继续"
+ * 一次性：localStorage 记 agreedAt + agreedVersion，后续不再骚扰
+ *
+ * 渲染全屏遮罩（fixed inset:0 z-index 9999），未确认时不显示 children。
+ * 这是 ToC 产品合规底线，漏了出事用户可以告你没尽到告知义务。
+ */
+
+import { toast } from '@/lib/ui-bus'
+import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
+import { useComplianceStore, shouldShowAgreement } from '@/stores/complianceStore'
+import { useUserStore } from '@/stores/userStore'
+import { BUSINESS_CONFIG } from '@/config/business.config'
+
+export default function AgreementGate({ children }: { children: React.ReactNode }) {
+  const { agreedAt, agreedVersion, agree } = useComplianceStore()
+  const user = useUserStore((s) => s.user)
+  const [mounted, setMounted] = useState(false)
+  const [scrollToBottom, setScrollToBottom] = useState(false)
+  const [checked1, setChecked1] = useState(false)  // 用户协议
+  const [checked2, setChecked2] = useState(false)  // 隐私政策
+  const [checked3, setChecked3] = useState(false)  // AI 风险说明
+  const [showAgreementFull, setShowAgreementFull] = useState(false)
+  const [showPrivacyFull, setShowPrivacyFull] = useState(false)
+
+  useEffect(() => { setMounted(true) }, [])
+
+  // ⭐ MEMORY §269 — 2026-08-28 奕霖紧急跳过:?skip-agree=1 query param → 自动 agree
+  // 背景:清缓存/服务重启后用户 localStorage 的 agreedAt 失效 → AgreementGate 弹出 →
+  //       蒙层挡死所有点击(用户试关键词时 chip 在底层但 modal 顶层拦截,Playwright 实测证实)
+  // 方案:URL 加 ?skip-agree=1 一键跳过(持久化到 localStorage,下次正常访问不再弹)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('skip-agree') === '1') {
+        agree()
+        const cleanUrl = window.location.pathname + window.location.hash
+        window.history.replaceState({}, '', cleanUrl)
+      }
+    } catch (e) {}
+  }, [])
+
+  // SSR 阶段不要渲染遮罩，避免 hydration 闪烁
+  if (!mounted) return <>{children}</>
+
+  const needAgree = shouldShowAgreement(agreedAt, agreedVersion)
+
+  const isLoggedIn = !!user?.id
+  // ⭐ 奕霖 2026-07-15 13:41 修复：已登录用户跳过协议确认
+  // 原因：协议确认遮挡 TabBar 导致用户找不到底部按键
+  // 已登录用户 = 已验证手机号 = 已隐含同意协议 = 信任状态
+  if (!needAgree || isLoggedIn) return <>{children}</>
+
+  const allChecked = checked1 && checked2 && checked3
+
+  function handleAgree() {
+    if (!allChecked) return
+    agree()
+  }
+
+  return (
+    <>
+      {children}
+      {/* ⭐ 奕霖 2026-07-06 14:07：Portal 渲染到 body + z-index 99999，避免被 BottomTabBar 遮挡 */}
+      {typeof document !== 'undefined' && createPortal(
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agreement-title"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 99999,
+          background: 'rgba(44, 24, 16, 0.96)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* 顶部标题 */}
+        <div
+          style={{
+            padding: 'calc(20px + env(safe-area-inset-top, 0px)) 24px 16px',
+            textAlign: 'center',
+            borderBottom: '1px solid rgba(184, 134, 11, 0.12)',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🥬</div>
+          <h1
+            id="agreement-title"
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              color: '#b8860b',
+              margin: 0,
+              letterSpacing: 1,
+            }}
+          >
+            欢迎使用果蔬鲜生
+          </h1>
+          <p style={{
+            fontSize: 13,
+            color: 'rgba(255, 255, 255, 0.55)',
+            margin: '6px 0 0',
+          }}>
+            使用前请阅读并同意以下条款
+          </p>
+        </div>
+
+        {/* 可滚动协议区 */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '20px 24px',
+            minHeight: 0,
+          }}
+        >
+          {/* 三个 checkbox 块 */}
+          <CheckItem
+            checked={checked1}
+            onChange={setChecked1}
+            label="我已阅读并同意"
+            link="《用户服务协议》"
+            onLinkClick={() => setShowAgreementFull(true)}
+            color="#b8860b"
+          />
+          <CheckItem
+            checked={checked2}
+            onChange={setChecked2}
+            label="我已阅读并同意"
+            link="《隐私政策》"
+            onLinkClick={() => setShowPrivacyFull(true)}
+            color="#b8860b"
+          />
+          <CheckItem
+            checked={checked3}
+            onChange={setChecked3}
+            label="我已知晓 AI 鲜蔬顾问（造型助手）的"
+            link="功能局限与风险"
+            onLinkClick={() => {
+              setChecked3(true)
+              toast.info('造型助手 AI 鲜蔬顾问说明：\n\n1. 造型助手是鲜蔬挑选助手，不是营养师、不是医生\n2. 果蔬建议基于常见营养知识，可能因个人体质不同有偏差\n3. 食物过敏（坚果/海鲜等）/慢病人群/孕期请咨询专业营养师或医生\n4. 配送时效受天气/路况影响，以实际送达为准\n5. 不替代专业医疗建议，如有不适请及时就医\n\n我已了解并接受以上，方可使用造型助手功能。')
+            }}
+            color="#b8860b"
+          />
+
+          {/* 风险提示框 */}
+          <div
+            style={{
+              marginTop: 20,
+              padding: '14px 16px',
+              background: 'rgba(251, 191, 36, 0.08)',
+              border: '1px solid rgba(251, 191, 36, 0.25)',
+              borderRadius: 12,
+              fontSize: 12,
+              color: 'rgba(255, 255, 255, 0.75)',
+              lineHeight: 1.65,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: '#b8860b', marginBottom: 6 }}>
+              ⚠️ 重要提示
+            </div>
+            本服务由 {BUSINESS_CONFIG.name} 提供，<strong>本平台不收取任何款项</strong>，
+            所有购物支付在门店完成（现金/微信/支付宝/银行卡）。
+            平台不接触、不留存您的支付凭证。
+            <br /><br />
+            <strong>造型助手建议仅供参考</strong>，不替代专业营养师或医生建议。
+            如有食物过敏 / 严重不适请咨询专业人士。
+          </div>
+
+          {/* 协议详情入口 */}
+          <div style={{
+            marginTop: 20,
+            fontSize: 12,
+            color: 'rgba(255, 255, 255, 0.5)',
+            textAlign: 'center',
+          }}>
+            点击链接可查看完整协议内容
+          </div>
+        </div>
+
+        {/* 底部固定按钮 */}
+        <div
+          style={{
+            padding: '16px 24px calc(16px + env(safe-area-inset-bottom, 0px))',
+            borderTop: '1px solid rgba(184, 134, 11, 0.12)',
+            background: 'rgba(44, 24, 16, 0.7)',
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={handleAgree}
+            disabled={!allChecked}
+            style={{
+              width: '100%',
+              padding: '14px 20px',
+              fontSize: 15,
+              fontWeight: 700,
+              color: allChecked ? '#2c1810' : 'rgba(255, 255, 255, 0.5)',
+              background: allChecked
+                ? 'linear-gradient(135deg, #b8860b 0%, #8b6508 100%)'
+                : 'rgba(184, 134, 11, 0.3)',
+              border: 'none',
+              borderRadius: 12,
+              cursor: allChecked ? 'pointer' : 'not-allowed',
+              boxShadow: allChecked ? '0 4px 16px rgba(184, 134, 11, 0.3)' : 'none',
+              transition: 'all 0.2s ease',
+              letterSpacing: 1,
+            }}
+          >
+            {allChecked ? '✓ 同意并继续' : '请先勾选全部条款'}
+          </button>
+        </div>
+      </div>,
+        document.body,
+      )}
+
+      {/* 协议全文弹窗（简化版，避免和文档源重复） */}
+      {showAgreementFull && (
+        <DocumentModal
+          title={`${BUSINESS_CONFIG.name}·用户服务协议`}
+          version="v2.0"
+          content={AGREEMENT_SUMMARY}
+          onClose={() => setShowAgreementFull(false)}
+        />
+      )}
+      {showPrivacyFull && (
+        <DocumentModal
+          title={`${BUSINESS_CONFIG.name}·隐私政策`}
+          version="v2.0"
+          content={PRIVACY_SUMMARY}
+          onClose={() => setShowPrivacyFull(false)}
+        />
+      )}
+    </>
+  )
+}
+
+function CheckItem({
+  checked,
+  onChange,
+  label,
+  link,
+  onLinkClick,
+  color,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  label: string
+  link: string
+  onLinkClick: () => void
+  color: string
+}) {
+  return (
+    <label
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 12,
+        padding: '14px 16px',
+        marginBottom: 10,
+        background: checked ? 'rgba(184, 134, 11, 0.06)' : 'rgba(255, 255, 255, 0.03)',
+        border: checked ? '1px solid rgba(184, 134, 11, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: 12,
+        cursor: 'pointer',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      <div
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          background: checked ? color : 'transparent',
+          border: checked ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          marginTop: 1,
+          fontSize: 14,
+          color: '#2c1810',
+          fontWeight: 900,
+        }}
+      >
+        {checked && '✓'}
+      </div>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ display: 'none' }}
+      />
+      <div style={{ flex: 1, fontSize: 14, color: 'rgba(255, 255, 255, 0.85)', lineHeight: 1.55 }}>
+        {label}
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); onLinkClick() }}
+          style={{
+            color,
+            textDecoration: 'underline',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            font: 'inherit',
+            fontWeight: 600,
+          }}
+        >
+          {link}
+        </button>
+      </div>
+    </label>
+  )
+}
+
+function DocumentModal({
+  title,
+  version,
+  content,
+  onClose,
+}: {
+  title: string
+  version: string
+  content: string
+  onClose: () => void
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10000,
+        background: 'rgba(0, 0, 0, 0.85)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          maxWidth: 480,
+          maxHeight: '85vh',
+          background: 'linear-gradient(180deg, #2c1810 0%, #1a0e08 100%)',
+          border: '1px solid rgba(184, 134, 11, 0.25)',
+          borderRadius: 16,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid rgba(184, 134, 11, 0.12)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#b8860b' }}>{title}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.5)', marginTop: 2 }}>版本 {version}</div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'rgba(184, 134, 11, 0.3)',
+              border: '1px solid rgba(184, 134, 11, 0.2)',
+              color: '#b8860b',
+              borderRadius: 8,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            关闭
+          </button>
+        </div>
+        <div style={{
+          padding: '16px 20px',
+          overflowY: 'auto',
+          fontSize: 13,
+          lineHeight: 1.7,
+          color: 'rgba(255, 255, 255, 0.75)',
+          flex: 1,
+          whiteSpace: 'pre-wrap',
+        }}>
+          {content}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* 协议摘要（避免文档外链 404 / 拉取慢） */
+const AGREEMENT_SUMMARY = `《${BUSINESS_CONFIG.name}·用户服务协议》 v2.0
+
+生效日期：2026-09-06
+
+一、服务内容
+1.1 提供服务：AI 鲜蔬挑选建议（造型助手）、会员服务、线上下单、门店自提 / 配送
+1.2 不提供服务：处方药销售、远程诊疗、医疗诊断、处方开具、烟酒销售
+
+二、AI 服务特别说明
+2.1 AI 定位：造型助手是鲜蔬挑选助手，不是营养师、不是医生、不是专业医疗人员
+2.2 AI 不能做的事：
+  • 不能替代专业营养师进行饮食指导
+  • 不能诊断疾病、不能开处方
+  • 不能替代急救（急症请立即拨打 120 或到最近急诊）
+  • 不能保证库存 100% 准确（建议到店或下单前确认）
+  • 不能用于医疗纠纷判定
+2.3 用户须知：果蔬建议基于常见营养知识 + 本店商品，可能因个人体质 / 过敏史不同有偏差
+2.4 用户责任：有食物过敏史 / 慢病 / 孕期请咨询营养师或医生；食用前请检查商品外观 / 保质期
+
+三、会员服务
+3.1 等级：普通 / 银卡 / 金卡 / VIP（按累计消费划分）
+3.2 积分：消费 1 元 = 1 积分，有效期 2 年，可兑换商品
+3.3 数据：用户有权查看、更正、删除会员数据，可随时注销
+
+四、订单与提货
+4.1 订单类型：门店自提（6 位取货码 7 天有效）/ 同城配送（当日达）
+4.2 支付方式：仅支持门店支付（现金 / 微信 / 支付宝 / 银行卡）
+4.3 平台不收取任何款项，所有支付通过门店收银完成
+4.4 退款：未提货订单可在线取消，已提货订单需到店协商
+
+五、用户行为规范
+5.1 禁止：虚假注册、刷单、滥用 AI、倒卖取货码、发布违法信息
+5.2 违规处理：警告、限制功能、封禁账号，严重者依法追责
+
+六、隐私保护
+详见《隐私政策》
+
+七、免责声明
+7.1 不承担责任：用户未如实告知过敏史 / 食用不当 / 不可抗力 / 第三方原因
+7.2 责任限制：以用户实际支付金额为限
+
+八、协议变更
+本协议可能更新，重大变更提前 7 天通知，继续使用即视为接受
+
+九、联系方式
+门店地址：${BUSINESS_CONFIG.contact.address}
+联系电话：${BUSINESS_CONFIG.contact.phone}
+营业时间：${BUSINESS_CONFIG.contact.hours}
+
+使用本服务即表示您已阅读、理解并同意本协议。`
+
+const PRIVACY_SUMMARY = `《${BUSINESS_CONFIG.name}·隐私政策》 v2.0
+
+生效日期：2026-09-06
+
+一、信息收集
+1.1 您主动提供：手机号、昵称、头像、收货地址、饮食偏好（过敏原如坚果 / 海鲜等）
+1.2 自动收集：设备信息、IP 地址、浏览记录（仅用于服务优化）
+1.3 第三方：微信 / 支付宝小程序（如有）将提供用户标识用于登录
+
+二、信息使用
+2.1 用于：为您提供果蔬挑选建议、商品推荐、订单服务、会员权益
+2.2 果蔬推荐：基于您的饮食偏好（过敏原）过滤相关商品
+2.3 不用于：精准营销推送（除非您主动订阅）、商业出售给第三方
+
+三、信息存储
+3.1 存储位置：境内服务器（阿里云 / 腾讯云）
+3.2 存储期限：账号存续期间 + 注销后 30 天内删除
+3.3 安全措施：HTTPS 传输、密码 bcrypt 加密、数据库访问审计
+
+四、信息共享
+4.1 不共享：您的饮食偏好不与第三方共享
+4.2 法定披露：配合监管部门执法时依法披露
+4.3 门店协作：到店自提时，门店可见您的取货码 + 订单内容
+
+五、您的权利
+5.1 查阅：您有权查看您的全部个人数据
+5.2 更正：您有权更正错误信息
+5.3 删除：您有权删除非必要信息
+5.4 注销：您有权随时注销账号（注销后 30 天内全部删除）
+5.5 撤回：您有权撤回任何已授权的同意
+
+六、Cookie 与同类技术
+6.1 我们使用 Cookie 维持登录态、记录偏好设置
+6.2 关闭 Cookie 不影响您使用核心功能，但可能影响体验
+
+七、未成年人保护
+7.1 18 岁以下用户请在监护人陪同下使用本服务
+7.2 不主动收集未成年人信息
+
+八、隐私政策更新
+8.1 本政策可能根据法律法规变化而更新
+8.2 重大变更提前 7 天通知
+
+九、联系方式
+隐私问题请联系：${BUSINESS_CONFIG.contact.phone}
+
+您使用本服务即表示同意本隐私政策。`

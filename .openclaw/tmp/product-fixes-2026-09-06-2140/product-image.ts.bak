@@ -1,0 +1,130 @@
+/**
+ * 商品占位图生成器 — 0-1 阶段 SVG 程序化方案
+ *
+ * 设计原则:
+ * - 按 categoryLabel / categoryCode 分组配色（同一类目色相近）
+ * - 中心放 emoji（药品语义）
+ * - 下方写商品名首 4 字（去括号）
+ * - 256x256 正方形，1:1 aspect，能直接配 css object-fit
+ */
+
+interface ProductForSvg {
+  name: string
+  shortName?: string | null
+  category?: string | null
+  categoryLabel?: string | null
+  dosage?: string | null
+}
+
+// 分类 → { 背景色（hex）, 主色（rgba用）, emoji }
+const PALETTE: Record<string, { bg: string, main: string, soft: string, emoji: string }> = {
+  // 0101-0105: 内服药大类
+  '0101': { bg: '#fdecea', main: '#c62828', soft: 'rgba(198,40,40,0.08)',  emoji: '❤️' },  // 心脑血管
+  '0102': { bg: '#e8f5e9', main: '#2e7d32', soft: 'rgba(46,125,50,0.08)', emoji: '💚' },
+  '0103': { bg: '#e3f2fd', main: '#1565c0', soft: 'rgba(21,101,192,0.08)',emoji: '🫁' },  // 呼吸系统
+  '0104': { bg: '#e8eaf6', main: '#283593', soft: 'rgba(40,53,147,0.08)', emoji: '🛡️' },  // 抗感染
+  '0105': { bg: '#e0f7fa', main: '#00838f', soft: 'rgba(0,131,143,0.08)', emoji: '🌿' },  // 感冒咳嗽
+
+  // 0106-0110
+  '0106': { bg: '#fce4ec', main: '#ad1457', soft: 'rgba(173,20,87,0.08)', emoji: '🌸' },  // 妇科
+  '0107': { bg: '#fff8e1', main: '#f57c00', soft: 'rgba(245,124,0,0.08)', emoji: '🧒' },  // 儿科
+  '0108': { bg: '#f3e5f5', main: '#6a1b9a', soft: 'rgba(106,27,154,0.08)',emoji: '🦴' },  // 风湿骨痛
+  '0109': { bg: '#fff3e0', main: '#e65100', soft: 'rgba(230,81,0,0.08)', emoji: '🍯' },  // 滋补营养
+  '0110': { bg: '#fce4ec', main: '#c2185b', soft: 'rgba(194,24,91,0.08)', emoji: '🧴' },  // 皮肤外用
+
+  // 0111-0115
+  '0111': { bg: '#efebe9', main: '#5d4037', soft: 'rgba(93,64,55,0.08)', emoji: '🌱' },  // 中药饮片
+  '0112': { bg: '#e0f2f1', main: '#00695c', soft: 'rgba(0,105,92,0.08)', emoji: '💊' },  // 保健用品
+  '0113': { bg: '#ffebee', main: '#b71c1c', soft: 'rgba(183,28,28,0.08)', emoji: '🩹' },  // 痔疮
+  '0114': { bg: '#ffe0b2', main: '#e65100', soft: 'rgba(230,81,0,0.08)', emoji: '🗣️' },  // 咽喉口腔
+  '0115': { bg: '#e1f5fe', main: '#0277bd', soft: 'rgba(2,119,189,0.08)', emoji: '👁️' },  // 五官眼科
+
+  // 0116-0119
+  '0116': { bg: '#e3f2fd', main: '#1976d2', soft: 'rgba(25,118,210,0.08)',emoji: '🧼' },  // 消毒用品
+  '0117': { bg: '#fffde7', main: '#f9a825', soft: 'rgba(249,168,37,0.08)', emoji: '🦴' },  // 补钙营养
+  '0118': { bg: '#f1f8e9', main: '#558b2f', soft: 'rgba(85,139,47,0.08)', emoji: '🥬' },  // 胃肠道
+  '0119': { bg: '#eceff1', main: '#455a64', soft: 'rgba(69,90,100,0.08)', emoji: '🧴' },  // 日用品
+
+  // 02-07: 其他品类大类
+  '0201': { bg: '#f3e5f5', main: '#7b1fa2', soft: 'rgba(123,31,162,0.08)',emoji: '💊' },
+  '0301': { bg: '#e1f5fe', main: '#0277bd', soft: 'rgba(2,119,189,0.08)', emoji: '👁️' },
+  '0501': { bg: '#e3f2fd', main: '#1976d2', soft: 'rgba(25,118,210,0.08)',emoji: '🩺' },  // 医疗器械
+  '0502': { bg: '#e3f2fd', main: '#1976d2', soft: 'rgba(25,118,210,0.08)',emoji: '🩺' },
+  '0601': { bg: '#fffde7', main: '#f9a825', soft: 'rgba(249,168,37,0.08)', emoji: '🍬' },  // 食品
+  '0701': { bg: '#e3f2fd', main: '#1976d2', soft: 'rgba(25,118,210,0.08)',emoji: '🧴' },
+}
+
+// 分类标签 → 同色系（用于 categoryLabel 不在 PALETTE key 时回退）
+const LABEL_TO_CODE: Record<string, string> = {
+  '感冒咳嗽': '0105',
+  '儿科感冒咳嗽': '0107',
+  '皮肤外用': '0110',
+  '风湿骨痛': '0108',
+  '日用品': '0119',
+  '抗感染消炎': '0104',
+  '医疗器械': '0501',
+  '食品营养': '0601',
+  '清热解毒': '0104',
+  '心血管降压': '0101',
+  '消毒用品': '0116',
+  '消化肝胆': '0118',
+  '补肾滋补': '0109',
+  '五官眼科': '0115',
+  '咽喉口腔': '0114',
+  '补钙营养': '0117',
+  '胃肠道': '0118',
+  '妇科用药': '0106',
+  '痔疮肛肠': '0113',
+  '糖尿病用药': '0101',
+  '中药饮片-根茎': '0111',
+}
+
+const FALLBACK = { bg: '#e8f5e9', main: '#2e7d32', soft: 'rgba(46,125,50,0.08)', emoji: '💊' }
+
+function pickColor(category?: string | null, categoryLabel?: string | null) {
+  if (category && PALETTE[category]) return PALETTE[category]
+  if (categoryLabel && LABEL_TO_CODE[categoryLabel]) {
+    return PALETTE[LABEL_TO_CODE[categoryLabel]] || FALLBACK
+  }
+  return FALLBACK
+}
+
+function shortName(p: ProductForSvg): string {
+  // 1) 优先 shortName，2) name 去括号取前 4 字
+  const raw = (p.shortName || p.name || '').trim()
+  // 去括号内容：氨咖黄敏胶囊(修正堂) → 氨咖黄敏胶囊
+  const noParen = raw.replace(/[\(（][^\)）]*[\)）]/g, '').trim()
+  // 取前 6 个汉字（4 字太短，6 字更适合 256px 大图）
+  return Array.from(noParen).slice(0, 6).join('')
+}
+
+export function generateProductSvg(p: ProductForSvg): string {
+  const color = pickColor(p.category, p.categoryLabel)
+  const name = shortName(p)
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${color.bg}" stop-opacity="1"/>
+      <stop offset="100%" stop-color="${color.bg}" stop-opacity="0.55"/>
+    </linearGradient>
+    <radialGradient id="r" cx="35%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="${color.main}" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="${color.main}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="24" fill="url(#g)"/>
+  <rect width="256" height="256" rx="24" fill="url(#r)"/>
+  <text x="128" y="135" font-size="98" text-anchor="middle" dominant-baseline="middle">${color.emoji}</text>
+  <rect x="0" y="180" width="256" height="76" rx="0" fill="${color.main}" fill-opacity="0.08"/>
+  <text x="128" y="220" font-size="22" font-weight="600" text-anchor="middle" fill="${color.main}" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif" letter-spacing="1">${escape(name)}</text>
+</svg>`
+}
+
+function escape(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
