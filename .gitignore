@@ -11,5 +11,7 @@ public/uploads/
 .mobile-test/
 .env
 .env.local
+.env-keys/
+**/.env-keys/
 *.key
 *.pem
