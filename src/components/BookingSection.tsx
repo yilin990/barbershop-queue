@@ -1108,6 +1108,13 @@ export default function BookingSection() {
   const reservedTomorrowOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'tomorrow').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
   const activeOrders = orders.filter(o => o.status === 'serving' || o.status === 'arrived' || o.status === 'reserved')
   const currentServing = servingOrders[0]
+  // ⭐ v1.1.24.1 (2026-10-05 16:00 奕霖立)：实时北京时间（wall clock）
+  //   v1.1.24 误以为"实时的时间"=服务时长，奕霖修正：要当前北京时间
+  //   依赖现有 `now` state（line ~1003 每秒刷新） + timeZone:'Asia/Shanghai'
+  const currentBeijingTime = now.toLocaleTimeString('zh-CN', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false, timeZone: 'Asia/Shanghai',
+  })
   // ⭐ 2026-10-05 00:56 奕霖立：实时队列信息（下一位预约、预计等待）
   const nextTodayReservation = reservedTodayOrders[0]
   const nextTomorrowReservation = reservedTomorrowOrders[0]
@@ -1613,12 +1620,16 @@ export default function BookingSection() {
           }}>
             {currentServing ? (
               <>
-                <div style={{ fontSize: 11, opacity: 0.85, letterSpacing: '0.1em' }}>正在服务</div>
+                <div style={{ fontSize: 11, opacity: 0.85, letterSpacing: '0.1em' }}>🕐 当前北京时间</div>
+                {/* ⭐ v1.1.24.1 (2026-10-05 16:00 奕霖立)：实时 wall clock（HH:mm:SS 秒级 tick） */}
                 <div style={{
-                  fontSize: 52, fontWeight: 900, fontFamily: 'monospace',
-                  letterSpacing: '0.05em', lineHeight: 1,
-                }}>{currentServing.scheduledAt}</div>
-                <div style={{ fontSize: 13, opacity: 0.95, fontWeight: 600 }}>
+                  fontSize: 48, fontWeight: 900, fontFamily: 'monospace',
+                  letterSpacing: '0.04em', lineHeight: 1,
+                  fontVariantNumeric: 'tabular-nums',  // 避免数字跳动
+                }}>
+                  {currentBeijingTime}
+                </div>
+                <div style={{ fontSize: 13, opacity: 0.95, fontWeight: 600, marginTop: 4 }}>
                   {currentServing.customerName} · {currentServing.stylistName}
                 </div>
                 <div style={{ fontSize: 12, opacity: 0.9 }}>
