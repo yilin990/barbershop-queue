@@ -104,7 +104,23 @@ export async function POST(request: NextRequest) {
 
     const db = getDb()
     const id = 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-    const orderNo = body.orderNo || ('A' + String(Date.now()).slice(-3))
+    // ⭐ v1.1.25 (2026-10-06 00:25 奕霖立)：INSERT 前查重（防 UNIQUE constraint failed on orderNo）
+    //   客户端显式传 orderNo 且已存在 → 409 + 友好错误
+    //   客户端没传 orderNo → 自动重命名加后缀直到唯一
+    let finalOrderNo: string = body.orderNo || ('A' + String(Date.now()).slice(-3))
+    if (body.orderNo) {
+      const exists = db.prepare('SELECT 1 FROM BarberQueue WHERE orderNo = ? AND merchantId = ?').get(finalOrderNo, merchantId)
+      if (exists) {
+        db.close()
+        return errorResponse(new Error(`orderNo '${finalOrderNo}' 已存在，请使用其他编号或省略 orderNo 自动生成`), 409)
+      }
+    } else {
+      for (let i = 0; i < 50; i++) {
+        const exists = db.prepare('SELECT 1 FROM BarberQueue WHERE orderNo = ? AND merchantId = ?').get(finalOrderNo, merchantId)
+        if (!exists) break
+        finalOrderNo = 'A' + String(Date.now() + i + 1).slice(-3)
+      }
+    }
     const orderType = body.type || 'booking'
     const customerName = body.customerName || ''
     const service = body.service || '剪发'
@@ -127,7 +143,7 @@ export async function POST(request: NextRequest) {
                               arrivedAt, startedAt, completedAt, note)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      id, merchantId, orderNo, orderType, customerName, customerPhone,
+      id, merchantId, finalOrderNo, orderType, customerName, customerPhone,
       service, stylistName, stylistCode, queueStatus, scheduledAt, scheduledDate,
       arrivedAt, startedAt, completedAt, note
     )
@@ -158,7 +174,7 @@ export async function POST(request: NextRequest) {
                                pickupCode, status, source, remark, createdAt, updatedAt)
           VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 'pickup', ?, ?, 'pending', ?, ?, datetime('now'), datetime('now'))
         `).run(
-          orderId, merchantId, customer?.id || null, orderNo,
+          orderId, merchantId, customer?.id || null, finalOrderNo,
           customerPhone, pickupCode, orderType, remarkText
         )
       } catch (orderDupErr: any) {
@@ -171,7 +187,7 @@ export async function POST(request: NextRequest) {
                                status, source, remark, createdAt, updatedAt)
           VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 'pickup', ?, 'pending', ?, ?, datetime('now'), datetime('now'))
         `).run(
-          orderId, merchantId, customer?.id || null, orderNo + '-Q',
+          orderId, merchantId, customer?.id || null, finalOrderNo + '-Q',
           customerPhone, orderType, remarkText
         )
         pickupCode = null
@@ -185,7 +201,7 @@ export async function POST(request: NextRequest) {
 
     return successResponse({
       id,
-      orderNo,
+      finalOrderNo,
       orderId,
       pickupCode,
       ...body,
