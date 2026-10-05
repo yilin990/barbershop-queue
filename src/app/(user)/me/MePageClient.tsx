@@ -1,0 +1,1400 @@
+'use client'
+
+// ⭐ 奕霖 2026-10-04 00:24：ShoppingCartIcon 移到 MeCartLink（server component）— 真打通 /me 的 SSR
+import { MeCartLink } from '@/components/MeCartLink'
+import { toast } from '@/lib/ui-bus'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import AppLayout from '@/components/AppLayout'
+import {
+  AlertTriangle,
+  Apple,
+  Balloon,
+  BarChart3,
+  Cake,
+  Calendar,
+  CalendarDays,
+  Camera,
+  Cat,
+  CheckCircle,
+  Cherry,
+  ClipboardList,
+  Clover,
+  Coffee,
+  Crown,
+  Dog,
+  Flower2,
+  Frown,
+  Gem,
+  Gift,
+  Hand,
+  Heart,
+  Leaf,
+  Lightbulb,
+  Loader,
+  Lock,
+  Medal,
+  MessageCircle,
+  MessageSquareText,
+  Package,
+  Panda,
+  PartyPopper,
+  Pencil,
+  Pill,
+  Rabbit,
+  Scissors,
+  ShoppingCart,
+  Smartphone,
+  Sparkles,
+  Sprout,
+  Star,
+  Stethoscope,
+  Store,
+  Ticket,
+  User,
+  Wind,
+  Wrench,
+} from 'lucide-react'
+import { useUserStore } from '@/stores/userStore'
+
+interface CommentItem {
+  id: string
+  rating: number
+  content: string
+  time: string
+  user: { nickname: string; avatar: string }
+}
+
+interface FeedbackItem {
+  id: string
+  type: string
+  content: string
+  time: string
+  status: string
+}
+
+
+/** 购物车入口卡片（server component · 0 闪烁）
+ * 奕霖 2026-10-04 00:24：count 由父 MePage 提供（client polling），这里只负责渲染
+ * MeCartLink 也是 server component → ShoppingCartIcon 进 initial HTML ✅
+ */
+function CartEntryCard({ count }: { count: number }) {
+  return <MeCartLink count={count} />
+}
+
+const GREEN = '#b8860b'
+
+const ROLE_LABELS: Record<string, React.ReactNode> = {
+  '普通': <><Sprout size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />普通会员</>,
+  '银卡': <><Medal size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />银卡会员</>,
+  '金卡': <><Medal size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />金卡会员</>,
+  'VIP': <><Crown size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />VIP会员</>,
+}
+
+export default function MePage({
+  initialUser,
+  initialToken,
+  children,
+}: {
+  initialUser?: any
+  initialToken?: string | null
+  children?: React.ReactNode
+}) {
+  const store = useUserStore()
+  // ⭐ 奕霖 2026-10-04 00:34：fallback 到 server 渲染的 initialUser，让 SSR 通过登录 gate
+  const user = store.user ?? initialUser ?? null
+  const isLoggedIn = store.isLoggedIn || !!initialUser
+  const token = store.token ?? initialToken ?? null
+  const { logout, refreshUser, restoreFromCookie, updateBasic } = store
+  const router = useRouter()
+  // ⭐ 2026-07-13 19:38 注销跳转后提示用户
+  useDeactivatedNotice()
+  // ⭐ 奕霖 2026-10-04 00:24：购物车 count state 提到页面级，让 CartEntryCard (server) 能接 prop
+  const [cartCount, setCartCount] = useState(0)
+  useEffect(() => {
+    const update = () => {
+      try {
+        const cart = JSON.parse(localStorage.getItem('cart') || '[]')
+        const total = cart.reduce((sum: number, it: any) => sum + (it.quantity || 1), 0)
+        setCartCount(total)
+      } catch { setCartCount(0) }
+    }
+    update()
+    window.addEventListener('storage', update)
+    const t = setInterval(update, 2000)
+    return () => { window.removeEventListener('storage', update); clearInterval(t) }
+  }, [])
+  const [activeTab, setActiveTab] = useState<'comments' | 'feedbacks' | 'profile'>('profile')
+  const [myComments, setMyComments] = useState<CommentItem[]>([])
+  const [myFeedbacks, setMyFeedbacks] = useState<FeedbackItem[]>([])
+  const [loadingComments, setLoadingComments] = useState(false)
+  const [loadingFeedbacks, setLoadingFeedbacks] = useState(false)
+  // ⭐ 清禾 2026-07-05 新增：编辑基础资料
+  const [editingBasic, setEditingBasic] = useState(false)
+  const [editNickname, setEditNickname] = useState('')
+  const [editAvatar, setEditAvatar] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editBirthday, setEditBirthday] = useState('')
+  const [editBirthYear, setEditBirthYear] = useState('')
+  const [editBirthMonth, setEditBirthMonth] = useState('')
+  const [editBirthDay, setEditBirthDay] = useState('')
+  const [savingBasic, setSavingBasic] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  // ⭐ 奕霖 2026-07-06：弹窗式编辑（头像、名字、生日、手机号）
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false)
+  const [nicknameModalOpen, setNicknameModalOpen] = useState(false)
+  const [birthdayModalOpen, setBirthdayModalOpen] = useState(false)
+  const [phoneModalOpen, setPhoneModalOpen] = useState(false)
+  const [savingQuick, setSavingQuick] = useState(false)
+
+  // ⭐ 奕霖 2026-07-05：24 个可选头像（去重 + 更可爱，6 草药 + 6 动物 + 6 符号 + 6 造型）
+  const AVATAR_OPTIONS = [
+    '🌿','🍵','🍀','🌱','🪷','🌸',
+    '🐰','🐱','🐼','🦊','🐶','🐻',
+    '💊','🩺','🌟','🍃','💚','✨',
+    '🍑','🍓','🍒','🥝','🍉','🧁',
+  ] as const
+
+  // 年份范围：1900-2015（成人范围）
+  const BIRTH_YEARS = Array.from({ length: 116 }, (_, i) => String(2015 - i))
+  const BIRTH_MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
+  function getDaysInMonth(year: string, month: string): number {
+    if (!year || !month) return 31
+    const y = parseInt(year); const m = parseInt(month)
+    return new Date(y, m, 0).getDate()
+  }
+  // ⭐ 奕霖 2026-07-06：根据年/月/日实时算周岁
+  function calcAge(yearStr: string, monthStr: string, dayStr: string): number | null {
+    if (!yearStr || !monthStr || !dayStr) return null
+    const y = parseInt(yearStr); const m = parseInt(monthStr); const d = parseInt(dayStr)
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return null
+    if (y < 1900 || y > 2015) return null
+    const today = new Date()
+    const birth = new Date(y, m - 1, d)
+    let age = today.getFullYear() - birth.getFullYear()
+    const monthDelta = today.getMonth() - birth.getMonth()
+    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birth.getDate())) age--
+    return age >= 0 && age < 150 ? age : null
+  }
+
+  // ⭐ 奕霖 2026-07-05 修复登录失效：从 cookie 恢复登录 + 刷新
+  useEffect(() => {
+    (async () => {
+      await restoreFromCookie()
+      const currentToken = useUserStore.getState().token
+      if (currentToken) refreshUser()
+    })()
+  }, [])
+
+  // ⭐ 奕霖 2026-08-08 13:35 反馈：「/me 头像积分 vs /me/points 积分不一致」
+  // 根因：userStore.user.points 读 User 表陈年值（841），Customer.points 才是 POS 实时源（1341）
+  // 之前修复：进 /me 时 fetch /api/me/summary 同步到 userStore，但 refreshUser 会拉回陈年 841
+  // 真修复：直接在 /me 页面用 livePoints state 读 /api/me/summary，不依赖 userStore 陈年缓存
+  const { updateUser } = useUserStore()
+  const [livePoints, setLivePoints] = useState<number | null>(null)
+  useEffect(() => {
+    let abort = false
+    ;(async () => {
+      try {
+        const token = useUserStore.getState().token
+        const res = await fetch('/api/me/summary', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          cache: 'no-store',
+        })
+        const json = await res.json()
+        if (!abort && json.success && json.user && !json.isDemo) {
+          const pts = Number(json.user.points) || 0
+          setLivePoints(pts)
+          // userStore 同步保留（兼容其他读 userStore 的地方，但 /me 自身用 livePoints）
+          updateUser({
+            role: json.user.role || '普通',
+            points: pts,
+          })
+        }
+      } catch (e) { /* ignore */ }
+    })()
+    return () => { abort = true }
+  }, [updateUser])
+
+  // Load comments when tab is opened
+  useEffect(() => {
+    if (activeTab === 'comments' && isLoggedIn && token) {
+      setLoadingComments(true)
+      fetch('/api/comments', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success) {
+            setMyComments(
+              data.comments
+                .filter((c: CommentItem) => c.user?.nickname === user?.nickname)
+                .map((c: CommentItem) => ({
+                  ...c,
+                  time: new Date(c.time).toLocaleDateString('zh-CN'),
+                }))
+            )
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingComments(false))
+    }
+  }, [activeTab, isLoggedIn, token])
+
+  // Load feedbacks when tab is opened
+  useEffect(() => {
+    if (activeTab === 'feedbacks' && isLoggedIn && token) {
+      setLoadingFeedbacks(true)
+      fetch('/api/feedbacks', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success) {
+            setMyFeedbacks(
+              data.feedbacks.map((f: FeedbackItem & { createdAt: string }) => ({
+                ...f,
+                time: new Date(f.createdAt).toLocaleDateString('zh-CN'),
+              }))
+            )
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingFeedbacks(false))
+    }
+  }, [activeTab, isLoggedIn, token])
+
+  const handleLogout = () => {
+    logout()
+    router.push('/merchant')
+  }
+
+  if (!isLoggedIn || !user) {
+    return (
+      <AppLayout title="我的">
+        <div
+          style={{
+            background: 'linear-gradient(180deg, rgba(112, 74, 54, 0.85) 0%, rgba(138, 94, 68, 0.9) 100%)',
+            borderRadius: '18px', padding: '40px 24px', textAlign: 'center',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+            border: '1px solid rgba(74, 46, 30, 0.6)',
+            backdropFilter: 'blur(20px)', marginTop: '20px',
+          }}
+        >
+          <div style={{ fontSize: '56px', marginBottom: '16px', filter: 'drop-shadow(0 4px 8px rgba(184, 134, 11, 0.4))' }}><Scissors size={56} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+          <h3 style={{ color: '#fff', fontSize: '18px', margin: '0 0 8px', fontWeight: 700, fontFamily: "Rye, 'Noto Serif SC', 'Songti SC', Georgia, serif", letterSpacing: 4, textShadow: '0 1px 2px rgba(0, 0, 0, 0.4)' }}>
+            请先登录
+          </h3>
+          <p style={{ color: 'rgba(255, 255, 255, 0.78)', fontSize: '13px', margin: '0 0 24px', lineHeight: 1.7 }}>
+            登录后可查看您的评论、反馈和收藏
+          </p>
+          <a
+            href="/login"
+            style={{
+              display: 'inline-block', padding: '14px 32px', borderRadius: '14px',
+              background: 'linear-gradient(135deg, #b8860b 0%, #8b6508 100%)', boxShadow: '0 4px 12px rgba(184, 134, 11, 0.4)',
+              color: '#2c1810', fontSize: '15px', fontWeight: 700, fontFamily: "'Alfa Slab One', 'Noto Serif SC', Georgia, serif", letterSpacing: '2px',
+              textDecoration: 'none', letterSpacing: '1px',
+            }}
+          >
+            去登录 →
+          </a>
+        </div>
+        {/* ⭐ 奕霖 2026-10-04 00:55：cart 入口始终展示（不管登录态），让 server-rendered SVG 进 initial HTML */}
+        {children}
+      </AppLayout>
+    )
+  }
+
+  const roleLabel = ROLE_LABELS[user.role] || <><Sprout size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />{`${user.role}会员`}</>
+  const joinDate = new Date(user.createdAt).toLocaleDateString('zh-CN', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  })
+
+  const tabs = [
+    { key: 'profile' as const, label: '个人资料', Icon: User },
+    { key: 'comments' as const, label: '我的评论', Icon: MessageCircle, count: myComments.length },
+    { key: 'feedbacks' as const, label: '我的反馈', Icon: MessageSquareText, count: myFeedbacks.length },
+  ]
+
+  // ⭐ MEMORY §305 v0.8.45 (2026-08-29 13:12 奕霖) — 砍掉 /me 右上角两个按钮:
+  // 之前有 📦 订单 + 🛒 购物车(按 v0.8.20 偏好加的)
+  // 现在:不需要了,砍掉 — "就这两个,别的不用多做"
+  return (
+    <AppLayout title="我的">
+      <div style={{ paddingBottom: 80 }}>      {/* ⭐ 奕霖 2026-07-06 终极重构：去除了重复的用户画像。所有信息只在一张卡片里展示。 */}
+      {/* 用户画像卡片 - 作为全新顶部（替代原 Hero + 原 用户画像双区冲突） */}
+      {/* ⭐ MEMORY §303 v0.8.43 三次调整 — 奕霖 2026-08-29 02:17:32:
+          个人资料/我的评论/我的反馈 三个按键相邻"上面"的模块离得太紧凑
+          v0.8.39 改的 gap 8→16 = 按钮左右间距
+          v0.8.43 第一次 marginBottom 0→16 = Tabs 容器下方间距(用户说"没调整好")
+          v0.8.43 第二次 marginBottom 16→20 = 同上继续加大
+          v0.8.43 第三次改这里 marginBottom 0→20 = 用户画像卡片和 Tabs 之间的上方间距
+          之前两次都改错位置了,这次是真正用户说的"上面模块" */}
+      <div style={{
+        background: 'linear-gradient(135deg, #2c1810 0%, #3a2416 50%, #2c1810 100%)',
+        borderRadius: '22px', padding: '20px 22px', marginBottom: '20px',
+        border: '1px solid rgba(184, 134, 11, 0.18)',
+        boxShadow: '0 16px 40px rgba(0, 0, 0, 0.35)',
+      }}>
+        {/* ⭐ 2026-08-18 清禾 — User 通用层 (跨商户同步) */}
+        <div style={{
+          padding: '4px 12px', marginBottom: 8, fontSize: 11,
+          color: 'rgba(184, 134, 11,0.7)', fontWeight: 600,
+          letterSpacing: '0.5px',
+        }}>
+          <User size={12} strokeWidth={1.5} style={{ marginRight: 6, verticalAlign: '-2px', display: 'inline-block' }} />User 通用档案 · 跨商户同步
+        </div>
+        {/* 头部：头像 + 昵称 + 角色 + 积分 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+          <button
+            type="button"
+            onClick={() => setAvatarModalOpen(true)}
+            title="点头像换图"
+            style={{
+              width: 60, height: 60, borderRadius: '50%', flexShrink: 0,
+              fontSize: 32, cursor: 'pointer',
+              background: 'rgba(184, 134, 11, 0.15)',
+              border: '2px solid rgba(184, 134, 11,0.35)',
+              fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 0, position: 'relative',
+            }}
+          >
+            {user.avatar ? <span style={{ fontSize: 32, lineHeight: 1 }}>{user.avatar}</span> : null}
+            <span style={{
+              position: 'absolute', bottom: -2, right: -2,
+              fontSize: 13, background: '#b8860b', color: '#faf6f0',
+              width: 20, height: 20, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #2c1810',
+            }}><Pencil size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} /></span>
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setEditNickname(user.nickname || '')
+                setSaveError('')
+                setNicknameModalOpen(true)
+              }}
+              style={{
+                display: 'block', padding: '2px 0', cursor: 'pointer',
+                background: 'transparent', border: 'none', textAlign: 'left',
+                color: '#fff', fontSize: 17, fontWeight: 700, fontFamily: "Rye, 'Noto Serif SC', 'Songti SC', Georgia, serif", letterSpacing: 1,
+                width: '100%',
+              }}
+            >
+              {user.nickname || '点击设昵称'}<span style={{ fontSize: 10, color: 'rgba(184, 134, 11,0.6)', marginLeft: 6 }}><Pencil size={10} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></span>
+            </button>
+            <div style={{ fontSize: 14, color: 'rgba(184, 134, 11,0.7)', marginTop: 3 }}>
+              {roleLabel}
+              <span style={{
+                marginLeft: 8,
+                padding: '2px 8px', borderRadius: 10,
+                background: 'rgba(184, 134, 11,0.15)', border: '1px solid rgba(184, 134, 11,0.3)',
+                color: '#b8860b', fontWeight: 600,
+              }}>⭐ {(livePoints ?? user.points ?? 0)} 分</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 分隔线 */}
+        <div style={{ height: 1, background: 'rgba(184, 134, 11,0.15)', marginBottom: 14 }} />
+
+        {/* ⭐ 奕霖 2026-07-06：所有用户信息在一张卡里（每条只出现一次） */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* 📱 手机号 */}
+          <div onClick={() => { setEditPhone(user.phone || ''); setSaveError(''); setPhoneModalOpen(true) }} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            fontSize: 14, cursor: 'pointer',
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.55)' }}><Smartphone size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />手机号</span>
+            <span style={{ color: '#fff', fontWeight: 500 }}>
+              {user.phone?.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') || '点设手机号'}<span style={{ fontSize: 10, color: 'rgba(184, 134, 11,0.6)', marginLeft: 6 }}><Pencil size={10} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></span>
+            </span>
+          </div>
+          {/* 🎂 生日 */}
+          <div onClick={() => {
+            const b = (user.profile?.birthday || (user as any).birthday) as string | undefined
+            if (b && /^\d{4}-\d{2}-\d{2}/.test(b)) {
+              setEditBirthYear(b.slice(0, 4)); setEditBirthMonth(b.slice(5, 7)); setEditBirthDay(b.slice(8, 10))
+            } else { setEditBirthYear(''); setEditBirthMonth(''); setEditBirthDay('') }
+            setSaveError(''); setBirthdayModalOpen(true)
+          }} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            fontSize: 14, cursor: 'pointer',
+          }}>
+            <span style={{ color: 'rgba(255,255,255,0.55)' }}><Cake size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />生日</span>
+            <span style={{ color: '#fff', fontWeight: 500 }}>
+              {(() => {
+                const b = user.profile?.birthday || (user as any).birthday
+                if (!b) return '点设生日'
+                const bd = new Date(b)
+                const today = new Date()
+                let age = today.getFullYear() - bd.getFullYear()
+                const m = today.getMonth() - bd.getMonth()
+                if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--
+                return `${bd.getFullYear()}/${String(bd.getMonth()+1).padStart(2,'0')}/${String(bd.getDate()).padStart(2,'0')} 🎈 ${age} 周岁`
+              })()}<span style={{ fontSize: 10, color: 'rgba(184, 134, 11,0.6)', marginLeft: 6 }}><Pencil size={10} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></span>
+            </span>
+          </div>
+          {/* 📅 注册时间 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
+            <span style={{ color: 'rgba(255,255,255,0.55)' }}><CalendarDays size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />注册时间</span>
+            <span style={{ color: 'rgba(255,255,255,0.85)' }}>{joinDate}</span>
+          </div>
+          {/* 📆 最后登录 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
+            <span style={{ color: 'rgba(255,255,255,0.55)' }}><Calendar size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />最后登录</span>
+            <span style={{ color: 'rgba(255,255,255,0.85)' }}>
+              {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('zh-CN') : '本次登录'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      {/* ⭐ MEMORY §268 + §303 (2026-08-29 奕霖) — 3 个按键(个人资料/我的评论/我的反馈)
+          上下相邻的模块离得太紧凑,需要一点间隙
+          v0.8.39 改的 gap 8→16 = 按钮左右间距
+          v0.8.43 第一次 Tabs marginBottom 0→16(下方,用户说"没调整好")
+          v0.8.43 第二次 Tabs marginBottom 16→20(下方,继续加大)
+          v0.8.43 第三次用户画像卡片 marginBottom 0→20(上方,真正的"上面模块紧凑")
+          现在 3 个按键上下左右都有 16-20px 间隙 */}
+      <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            style={{
+              flex: 1, padding: '14px 8px', borderRadius: '12px',
+              border: activeTab === tab.key
+                ? '1px solid rgba(184, 134, 11, 0.35)'
+                : '1px solid rgba(184, 134, 11, 0.1)',
+              background: activeTab === tab.key
+                ? 'linear-gradient(135deg, rgba(184, 134, 11, 0.2) 0%, rgba(184, 134, 11, 0.08) 100%)'
+                : 'rgba(184, 134, 11, 0.04)',
+              color: activeTab === tab.key ? '#b8860b' : 'rgba(184, 134, 11, 0.6)',
+              fontSize: '14px', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s ease',
+            }}
+          >
+            <tab.Icon size={20} strokeWidth={1.5} style={{ marginBottom: '6px', display: 'block' }} />
+            {tab.label}
+            {tab.count !== undefined && tab.count > 0 && (
+              <div style={{
+                marginTop: '3px', fontSize: '12px',
+                color: activeTab === tab.key ? '#b8860b' : 'rgba(184, 134, 11, 0.5)',
+              }}>
+                {tab.count}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div style={{
+        background: 'linear-gradient(180deg, rgba(112, 74, 54, 0.85) 0%, rgba(138, 94, 68, 0.9) 100%)',
+        borderRadius: '18px', padding: '20px', marginBottom: '16px',
+        border: '1px solid rgba(74, 46, 30, 0.6)',
+        backdropFilter: 'blur(20px)', minHeight: '200px',
+      }}>
+        {activeTab === 'profile' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* ⭐ 奕霖 2026-07-06 重构：用户画像卡片（去掉重复头像/名字/手机号，干净展示） */}
+            <div style={{
+              padding: '14px 16px', borderRadius: '14px',
+              background: 'linear-gradient(135deg, rgba(184, 134, 11,0.06) 0%, rgba(184,134,11,0.18) 100%)',
+              border: '1px solid rgba(184, 134, 11,0.18)',
+              marginBottom: '6px',
+            }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: 10,
+              }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(184, 134, 11,0.85)' }}>
+                  <ClipboardList size={12} strokeWidth={1.5} style={{ marginRight: 6, verticalAlign: '-2px', display: 'inline-block' }} />用户画像
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const b = (user.profile?.birthday || (user as any).birthday) as string | undefined
+                    if (b && /^\d{4}-\d{2}-\d{2}/.test(b)) {
+                      setEditBirthYear(b.slice(0, 4))
+                      setEditBirthMonth(b.slice(5, 7))
+                      setEditBirthDay(b.slice(8, 10))
+                    } else {
+                      setEditBirthYear(''); setEditBirthMonth(''); setEditBirthDay('')
+                    }
+                    setSaveError('')
+                    setBirthdayModalOpen(true)
+                  }}
+                  style={{
+                    fontSize: 11, padding: '4px 10px', borderRadius: 12,
+                    background: 'rgba(184, 134, 11,0.12)', border: '1px solid rgba(184, 134, 11,0.3)',
+                    color: '#b8860b', cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                ><Pencil size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />改生日/手机</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* 📱 手机号 */}
+                <div onClick={() => {
+                  setEditPhone(user.phone || '')
+                  setSaveError('')
+                  setPhoneModalOpen(true)
+                }} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  fontSize: 14, cursor: 'pointer', padding: '6px 0',
+                  borderBottom: '1px dashed rgba(184, 134, 11,0.1)',
+                }}>
+                  <span style={{ color: 'rgba(255,255,255,0.55)' }}><Smartphone size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />手机号</span>
+                  <span style={{ color: '#fff', fontWeight: 500 }}>
+                    {user.phone?.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') || '点设手机号'}
+                  </span>
+                </div>
+                {/* 🎂 生日 */}
+                <div onClick={() => {
+                  const b = (user.profile?.birthday || (user as any).birthday) as string | undefined
+                  if (b && /^\d{4}-\d{2}-\d{2}/.test(b)) {
+                    setEditBirthYear(b.slice(0, 4))
+                    setEditBirthMonth(b.slice(5, 7))
+                    setEditBirthDay(b.slice(8, 10))
+                  } else { setEditBirthYear(''); setEditBirthMonth(''); setEditBirthDay('') }
+                  setSaveError(''); setBirthdayModalOpen(true)
+                }} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  fontSize: 14, cursor: 'pointer', padding: '6px 0',
+                  borderBottom: '1px dashed rgba(184, 134, 11,0.1)',
+                }}>
+                  <span style={{ color: 'rgba(255,255,255,0.55)' }}><Cake size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />生日</span>
+                  <span style={{ color: '#fff', fontWeight: 500 }}>
+                    {(() => {
+                      const b = user.profile?.birthday || (user as any).birthday
+                      if (!b) return '点设生日'
+                      const bd = new Date(b)
+                      const today = new Date()
+                      let age = today.getFullYear() - bd.getFullYear()
+                      const m = today.getMonth() - bd.getMonth()
+                      if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--
+                      return `${bd.getFullYear()}/${String(bd.getMonth()+1).padStart(2,'0')}/${String(bd.getDate()).padStart(2,'0')} 🎈 ${age} 周岁`
+                    })()}
+                  </span>
+                </div>
+                {/* 👤 性别 / 🤧 过敏 / 💊 慢病 都先隐藏（数据没收集） */}
+              </div>
+            </div>
+
+            {/* 快捷入口：积分 + 活动 + 优惠券 */}
+            {/* ⭐ MEMORY §303 (2026-08-29 02:15 奕霖) — 积分/优惠券按键太大,优化:
+                padding 16 14 → 10 12 / emoji 26 → 20 / 删掉"🏪 本店 · 会员权益"提示行
+                主文字 13 → 12 / 副文字 11 → 10 / grid gap 10 → 12 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '10px' }}>
+              <button
+                onClick={() => router.push('/me/points')}
+                style={{
+                  padding: '10px 12px', borderRadius: '12px', cursor: 'pointer', textAlign: 'left',
+                  background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.15) 0%, rgba(44, 24, 16, 0.3) 100%)',
+                  border: '1px solid rgba(184, 134, 11, 0.3)',
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                }}
+              >
+                <div style={{ fontSize: '20px' }}><Gem size={20} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#b8860b', marginBottom: '1px' }}>我的积分</div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>{(livePoints ?? user.points ?? 0)} 分可兑</div>
+                </div>
+              </button>
+              <button
+                onClick={() => router.push('/me/coupons')}
+                style={{
+                  padding: '10px 12px', borderRadius: '12px', cursor: 'pointer', textAlign: 'left',
+                  background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.15) 0%, rgba(184, 134, 11, 0.2) 100%)',
+                  border: '1px solid rgba(184, 134, 11, 0.3)',
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                }}
+              >
+                <div style={{ fontSize: '20px' }}><Ticket size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />️</div>
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#b8860b', marginBottom: '1px' }}>我的优惠券</div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>查看领取的券</div>
+                </div>
+              </button>
+            </div>
+            {/* 活动中心单独一行 */}
+            <button
+              onClick={() => router.push('/activity')}
+              style={{
+                padding: '14px 16px', borderRadius: '14px', cursor: 'pointer', textAlign: 'left',
+                background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.12) 0%, rgba(184, 134, 11, 0.15) 100%)',
+                border: '1px solid rgba(184, 134, 11, 0.3)',
+                display: 'flex', alignItems: 'center', gap: '12px',
+                marginBottom: '6px',
+              }}
+            >
+              <div style={{ fontSize: '24px' }}><PartyPopper size={24} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#f472b6', marginBottom: '2px' }}>活动中心</div>
+                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>秒杀 · 满减 · 拼团</div>
+              </div>
+              <div style={{ fontSize: '20px', color: 'rgba(255,255,255,0.3)' }}>→</div>
+            </button>
+
+            {/* 购物车单独一行 · 奕霖 2026-10-04 00:34：购物车 server-rendered（children from server shell） */}
+            {children}
+
+            {/* ⭐ 奕霖 2026-07-03：我的偏好 / 拼团 / 社区 三个入口 */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 6,
+            }}>
+              <button
+                onClick={() => router.push('/me/health-profile')}
+                style={{
+                  padding: '14px 10px', borderRadius: 14, cursor: 'pointer', textAlign: 'center',
+                  background: 'linear-gradient(135deg, rgba(184, 134, 11,0.15), rgba(184,134,11,0.3))',
+                  border: '1px solid rgba(184, 134, 11,0.25)',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <div style={{ fontSize: 22, marginBottom: 2 }}><Apple size={22} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: GREEN }}>我的偏好</div>
+              </button>
+              <button
+                onClick={() => router.push('/groupbuy')}
+                style={{
+                  padding: '14px 10px', borderRadius: 14, cursor: 'pointer', textAlign: 'center',
+                  background: 'linear-gradient(135deg, rgba(184,134,11,0.15), rgba(184,134,11,0.2))',
+                  border: '1px solid rgba(244,114,182,0.25)',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <div style={{ fontSize: 22, marginBottom: 2 }}><Gift size={22} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#f472b6' }}>拼团</div>
+              </button>
+              <button
+                onClick={() => router.push('/community')}
+                style={{
+                  padding: '14px 10px', borderRadius: 14, cursor: 'pointer', textAlign: 'center',
+                  background: 'linear-gradient(135deg, rgba(184,134,11,0.15), rgba(184,134,11,0.1))',
+                  border: '1px solid rgba(184,134,11,0.25)',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <div style={{ fontSize: 22, marginBottom: 2 }}><MessageCircle size={22} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#a78bfa' }}>社区</div>
+              </button>
+            </div>
+
+            {/* ⭐ 奕霖 2026-07-06 终极拆分：性别/过敏/慢病全在健康画像页面(/me/health-profile)。这里不重复显示。
+                点下面的"🩺 健康画像"按钮就能进。 */}
+            <div
+              onClick={() => router.push('/me/health-profile')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '12px 14px', borderRadius: 12,
+                background: 'linear-gradient(135deg, rgba(184, 134, 11,0.08) 0%, rgba(184,134,11,0.18) 100%)',
+                border: '1px solid rgba(184, 134, 11,0.2)',
+                cursor: 'pointer', fontSize: 13, color: '#b8860b', fontWeight: 600,
+              }}
+            >
+              <span style={{ fontSize: 16 }}><Apple size={16} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></span>
+              <span>管理我的偏好（性别 / 食物过敏 / 饮食习惯 / 口味偏好）</span>
+              <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)' }}>→</span>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'comments' && (
+          loadingComments ? (
+            <LoadingState />
+          ) : myComments.length === 0 ? (
+            <EmptyState icon={MessageCircle} text="暂无评论记录" sub="快去发表你的第一评论吧" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {myComments.map((c) => (
+                <div key={c.id} style={{
+                  padding: '14px', background: 'rgba(184, 134, 11, 0.06)',
+                  borderRadius: '12px', border: '1px solid rgba(74, 46, 30, 0.6)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '12px', color: '#b8860b' }}>{'⭐'.repeat(c.rating)}</span>
+                    <span style={{ fontSize: '11px', color: 'rgba(184, 134, 11, 0.4)' }}>{c.time}</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', lineHeight: 1.7, color: 'rgba(255,255,255,0.8)' }}>
+                    {c.content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {activeTab === 'feedbacks' && (
+          loadingFeedbacks ? (
+            <LoadingState />
+          ) : myFeedbacks.length === 0 ? (
+            <EmptyState icon={MessageSquareText} text="暂无反馈记录" sub="您的每条反馈都很重要" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {myFeedbacks.map((f) => (
+                <div key={f.id} style={{
+                  padding: '14px', background: 'rgba(184, 134, 11, 0.06)',
+                  borderRadius: '12px', border: '1px solid rgba(74, 46, 30, 0.6)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{
+                      fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
+                      background: 'rgba(184, 134, 11, 0.1)',
+                      color: '#b8860b', border: '1px solid rgba(184, 134, 11, 0.2)',
+                    }}>
+                      <>
+                        {f.type === 'suggestion' && <><Lightbulb size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />建议</>}
+                        {f.type === 'complaint' && <><Frown size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />投诉</>}
+                        {f.type === 'praise' && <><Hand size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />表扬</>}
+                        {!['suggestion','complaint','praise'].includes(f.type) && <><ClipboardList size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />其他</>}
+                      </>
+                    </span>
+                    <span style={{ fontSize: '11px', color: 'rgba(184, 134, 11, 0.4)' }}>{f.time}</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', lineHeight: 1.7, color: 'rgba(255,255,255,0.8)' }}>
+                    {f.content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Logout */}
+      <button
+        onClick={handleLogout}
+        style={{
+          width: '100%', marginBottom: '16px', padding: '14px', borderRadius: '14px',
+          border: '1px solid rgba(184, 134, 11, 0.3)',
+          background: 'rgba(184, 134, 11, 0.08)',
+          color: 'rgba(184, 134, 11, 0.8)', fontSize: '15px', fontWeight: 600,
+          cursor: 'pointer', letterSpacing: '1px', transition: 'all 0.3s ease',
+        }}
+      >
+        退出登录
+      </button>
+
+      {/* Footer */}
+      <div style={{ textAlign: 'center', padding: '20px 0 8px' }}>
+        <div style={{
+          width: '80px', height: '4px',
+          background: 'linear-gradient(90deg, transparent, rgba(184, 134, 11, 0.4), transparent)',
+          margin: '0 auto 16px', borderRadius: '2px',
+        }} />
+
+      </div>
+
+      {/* ⭐ 奕霖 2026-07-06：4 个 modal（头像、昵称、生日、手机号）独立弹窗编辑 */}
+      {/* 头像 Modal */}
+      {avatarModalOpen && (
+        <div
+          onClick={() => setAvatarModalOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999,
+            background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #2c1810 0%, #1a0e08 100%)',
+            borderRadius: 18, padding: '20px 18px',
+            width: '100%', maxWidth: 380,
+            border: '1px solid rgba(184, 134, 11, 0.3)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            maxHeight: 'calc(100dvh - 80px)',
+            overflowY: 'auto',
+            paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#b8860b' }}><Camera size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />选个新头像</div>
+              <button onClick={() => setAvatarModalOpen(false)} style={{
+                background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+                fontSize: 22, cursor: 'pointer', padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
+              {AVATAR_OPTIONS.map((emo) => (
+                <button
+                  key={emo} type="button"
+                  onClick={async () => {
+                    setEditAvatar(emo)
+                    setSavingQuick(true)
+                    try {
+                      await updateBasic({ avatar: emo })
+                      setAvatarModalOpen(false)
+                    } catch (e: any) {
+                      setSaveError(e?.message || '换头像失败')
+                    } finally {
+                      setSavingQuick(false)
+                    }
+                  }}
+                  disabled={savingQuick}
+                  style={{
+                    aspectRatio: '1', borderRadius: 10, cursor: savingQuick ? 'wait' : 'pointer',
+                    fontSize: 24,
+                    background: user.avatar === emo
+                      ? 'linear-gradient(135deg, rgba(184, 134, 11,0.5), rgba(184,134,11,0.7))'
+                      : 'rgba(0,0,0,0.25)',
+                    border: user.avatar === emo
+                      ? '2px solid #b8860b'
+                      : '1px solid rgba(184, 134, 11,0.18)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >{emo}</button>
+              ))}
+            </div>
+            {saveError && avatarModalOpen && (
+              <div style={{
+                marginTop: 10, padding: '8px 10px', borderRadius: 8,
+                background: 'rgba(255,107,107,0.12)', color: '#b8860b', fontSize: 12,
+              }}><AlertTriangle size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />️ {saveError}</div>
+            )}
+            <button onClick={() => setAvatarModalOpen(false)} style={{
+              marginTop: 14, width: '100%', padding: '10px',
+              borderRadius: 10, cursor: 'pointer',
+              background: 'rgba(184, 134, 11,0.08)', border: '1px solid rgba(184, 134, 11,0.2)',
+              color: 'rgba(255,255,255,0.65)', fontSize: 13, fontFamily: 'inherit',
+            }}>关闭</button>
+          </div>
+        </div>
+      )}
+
+      {/* 昵称 Modal */}
+      {nicknameModalOpen && (
+        <div onClick={() => setNicknameModalOpen(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 999,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 16,
+          paddingTop: 'max(60px, env(safe-area-inset-top, 60px))',
+          overflowY: 'auto',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #2c1810 0%, #1a0e08 100%)',
+            borderRadius: 18, padding: '20px 18px', width: '100%', maxWidth: 380,
+            border: '1px solid rgba(184, 134, 11, 0.3)',
+            maxHeight: 'calc(100dvh - 80px)',
+            overflowY: 'auto',
+            paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#b8860b' }}><Pencil size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />改昵称</div>
+              <button onClick={() => setNicknameModalOpen(false)} style={{
+                background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+                fontSize: 22, cursor: 'pointer', padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+            <input
+              autoFocus
+              value={editNickname}
+              onChange={(e) => setEditNickname(e.target.value.slice(0, 20))}
+              placeholder="如何称呼你"
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: 10,
+                border: '1px solid rgba(184, 134, 11,0.3)', background: 'rgba(0,0,0,0.3)',
+                color: '#fff', fontSize: 15, fontFamily: 'inherit', marginBottom: 12,
+              }}
+              maxLength={20}
+            />
+            <button
+              disabled={savingQuick || !editNickname.trim()}
+              onClick={async () => {
+                if (!editNickname.trim()) return
+                setSavingQuick(true); setSaveError('')
+                try {
+                  await updateBasic({ nickname: editNickname.trim() })
+                  setNicknameModalOpen(false)
+                } catch (e: any) {
+                  setSaveError(e?.message || '保存失败')
+                } finally { setSavingQuick(false) }
+              }}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 12, cursor: 'pointer',
+                background: savingQuick ? 'rgba(184, 134, 11,0.2)' : 'linear-gradient(135deg, #b8860b, #5cb85c)',
+                border: 'none', color: '#faf6f0', fontSize: 14, fontWeight: 700, fontFamily: 'inherit',
+              }}
+            >{savingQuick ? '保存中...' : '保存'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* 生日 Modal */}
+      {birthdayModalOpen && (
+        <div onClick={() => setBirthdayModalOpen(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 999,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 16,
+          paddingTop: 'max(60px, env(safe-area-inset-top, 60px))',
+          overflowY: 'auto',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #2c1810 0%, #1a0e08 100%)',
+            borderRadius: 18, padding: '20px 18px', width: '100%', maxWidth: 380,
+            border: '1px solid rgba(184, 134, 11, 0.3)',
+            maxHeight: 'calc(100dvh - 80px)',
+            overflowY: 'auto',
+            paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#b8860b' }}><Cake size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />设生日</div>
+              <button onClick={() => setBirthdayModalOpen(false)} style={{
+                background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+                fontSize: 22, cursor: 'pointer', padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <input type="number" inputMode="numeric"
+                value={editBirthYear}
+                onChange={(e) => setEditBirthYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="年 (1900-2015)" min={1900} max={2015}
+                style={{ padding: '10px 8px', borderRadius: 10, border: '1px solid rgba(184, 134, 11,0.3)', background: 'rgba(0,0,0,0.3)', color: editBirthYear ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 15, fontFamily: 'inherit', WebkitAppearance: 'none' }} />
+              <select value={editBirthMonth} onChange={(e) => { setEditBirthMonth(e.target.value); setEditBirthDay('') }}
+                style={{ padding: '10px 6px', borderRadius: 10, border: '1px solid rgba(184, 134, 11,0.3)', background: 'rgba(0,0,0,0.3)', color: editBirthMonth ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 15, fontFamily: 'inherit', colorScheme: 'dark' }}>
+                <option value="">月</option>
+                {BIRTH_MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <select value={editBirthDay} onChange={(e) => setEditBirthDay(e.target.value)}
+                style={{ padding: '10px 6px', borderRadius: 10, border: '1px solid rgba(184, 134, 11,0.3)', background: 'rgba(0,0,0,0.3)', color: editBirthDay ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 15, fontFamily: 'inherit', colorScheme: 'dark' }}>
+                <option value="">日</option>
+                {Array.from({ length: getDaysInMonth(editBirthYear, editBirthMonth) }, (_, i) => String(i + 1).padStart(2, '0')).map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div style={{ textAlign: 'center', fontSize: 13, color: 'rgba(184, 134, 11,0.7)', marginBottom: 12 }}>
+              {(() => {
+                const age = calcAge(editBirthYear, editBirthMonth, editBirthDay)
+                return age !== null ? `年龄：${age} 周岁` : <><AlertTriangle size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block' }} />年龄需填全 年/月/日</>
+              })()}
+            </div>
+            <button
+              disabled={savingQuick || (!editBirthYear && !editBirthMonth && !editBirthDay)}
+              onClick={async () => {
+                setSaveError('')
+                let birthdayValue: string | null = null
+                if (editBirthYear && editBirthMonth && editBirthDay) {
+                  birthdayValue = `${editBirthYear}-${editBirthMonth}-${editBirthDay}`
+                } else if (editBirthYear || editBirthMonth || editBirthDay) {
+                  setSaveError('生日请选完整 年/月/日')
+                  return
+                }
+                setSavingQuick(true)
+                try {
+                  await updateBasic({ birthday: birthdayValue })
+                  setBirthdayModalOpen(false)
+                } catch (e: any) {
+                  setSaveError(e?.message || '保存失败')
+                } finally { setSavingQuick(false) }
+              }}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 12, cursor: 'pointer',
+                background: savingQuick ? 'rgba(184, 134, 11,0.2)' : 'linear-gradient(135deg, #b8860b, #5cb85c)',
+                border: 'none', color: '#faf6f0', fontSize: 14, fontWeight: 700, fontFamily: 'inherit',
+              }}
+            >{savingQuick ? '保存中...' : '保存'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* 手机号 Modal */}
+      {phoneModalOpen && (
+        <div onClick={() => setPhoneModalOpen(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 999,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 16,
+          paddingTop: 'max(60px, env(safe-area-inset-top, 60px))',
+          overflowY: 'auto',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #2c1810 0%, #1a0e08 100%)',
+            borderRadius: 18, padding: '20px 18px', width: '100%', maxWidth: 380,
+            border: '1px solid rgba(184, 134, 11, 0.3)',
+            maxHeight: 'calc(100dvh - 80px)',
+            overflowY: 'auto',
+            paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#b8860b' }}><Smartphone size={12} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline-block' }} />换绑手机号</div>
+              <button onClick={() => setPhoneModalOpen(false)} style={{
+                background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+                fontSize: 22, cursor: 'pointer', padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+            <input
+              autoFocus
+              value={editPhone}
+              onChange={(e) => setEditPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+              placeholder="11 位手机号（换绑）"
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: 10,
+                border: '1px solid rgba(184, 134, 11,0.3)', background: 'rgba(0,0,0,0.3)',
+                color: '#fff', fontSize: 15, fontFamily: 'inherit', marginBottom: 12,
+              }}
+              maxLength={11}
+            />
+            <button
+              disabled={savingQuick || !/^1[3-9]\d{9}$/.test(editPhone)}
+              onClick={async () => {
+                if (!/^1[3-9]\d{9}$/.test(editPhone)) {
+                  setSaveError('请输合法手机号')
+                  return
+                }
+                setSavingQuick(true); setSaveError('')
+                try {
+                  await updateBasic({ phone: editPhone })
+                  setPhoneModalOpen(false)
+                } catch (e: any) {
+                  setSaveError(e?.message || '保存失败')
+                } finally { setSavingQuick(false) }
+              }}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 12, cursor: 'pointer',
+                background: savingQuick || !/^1[3-9]\d{9}$/.test(editPhone) ? 'rgba(184, 134, 11,0.2)' : 'linear-gradient(135deg, #b8860b, #5cb85c)',
+                border: 'none', color: '#faf6f0', fontSize: 14, fontWeight: 700, fontFamily: 'inherit',
+              }}
+            >{savingQuick ? '保存中...' : '保存'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* ⭐ 奕霖 2026-07-07 13:30：店员入口从首页迁移到「我的」Tab 底部折叠区 */}
+      <StaffEntrySection router={router} />
+
+      {/* ⭐ 2026-07-13 14:05 注销账户按钮（仅普通用户可点）*/}
+      <DeactivateAccountSection onDeactivated={() => {
+        // 已退出，无需额外动作
+      }} />
+      </div>
+    </AppLayout>
+  )
+}
+
+/** 店员入口折叠区（0-1 阶段简单：点开才能看，未认证状态在 /pickup 二次检查） */
+function StaffEntrySection({ router }: { router: ReturnType<typeof useRouter> }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 24, marginBottom: 8, paddingBottom: 80 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 18px',
+          background: 'rgba(184, 134, 11, 0.04)',
+          border: '1px solid rgba(184, 134, 11, 0.15)',
+          borderRadius: 14,
+          color: 'rgba(255,255,255,0.55)',
+          fontSize: 13, fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <span><Wrench size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />️ 我是店员</span>
+        <span style={{ fontSize: 11, opacity: 0.7 }}>{open ? '收起 ▲' : '展开 ▼'}</span>
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 10,
+          padding: '16px 18px',
+          background: 'rgba(184, 134, 11, 0.06)',
+          border: '1px solid rgba(255, 165, 0, 0.18)',
+          borderRadius: 14,
+        }}>
+          <div style={{ fontSize: 12, color: 'rgba(255, 165, 0, 0.85)', marginBottom: 10, lineHeight: 1.6 }}>
+            <strong>店员专属入口</strong><br />
+            0-1 阶段仅限店内工作人员使用。需要店长提供 PIN 码（4-6 位数字）方可进入。
+          </div>
+          {/* ⭐ MEMORY §304 v0.8.44 (2026-08-29 13:08 奕霖) — 加回 PIN 验证:
+              v0.8.43 砍 StaffGate(没 PIN 弹窗)→ v0.8.44 加回 StaffGate
+              按钮文案改为 "<><Lock size={13} strokeWidth={1.5} style={{ marginRight: 6, verticalAlign: '-2px', display: 'inline-block' }} />输入 PIN 进入核销中心</>"(告知用户需输 PIN) */}
+          <button
+            onClick={() => router.push('/retail')}
+            style={{
+              width: '100%',
+              padding: '12px',
+              borderRadius: 10,
+              border: 'none',
+              background: 'linear-gradient(135deg, #b8860b, #8b6508)',
+              color: '#2c1810',
+              fontSize: 14, fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              marginBottom: 8,
+            }}
+          >
+            <><Lock size={13} strokeWidth={1.5} style={{ marginRight: 6, verticalAlign: '-2px', display: 'inline-block' }} />输入 PIN 进入核销中心</>
+          </button>
+          <button
+            onClick={() => router.push('/admin')}
+            style={{
+              width: '100%',
+              padding: '12px',
+              borderRadius: 10,
+              border: '1px solid rgba(184, 134, 11, 0.3)',
+              background: 'rgba(184, 134, 11, 0.08)',
+              color: 'rgba(184, 134, 11, 0.95)',
+              fontSize: 14, fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <><BarChart3 size={13} strokeWidth={1.5} style={{ marginRight: 6, verticalAlign: '-2px', display: 'inline-block' }} />管理商户程序</>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 注销账户折叠区（0-1 阶段：默认收起，需手动打开才看到） */
+function DeactivateAccountSection({ onDeactivated }: { onDeactivated: () => void }) {
+  const { token, logout } = useUserStore()
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [step, setStep] = useState<'warn'|'confirm'|'submitting'>('warn')
+  const [confirmation, setConfirmation] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [agreedChecked, setAgreedChecked] = useState(false)
+
+  const reset = () => {
+    setStep('warn'); setConfirmation(''); setErr(null); setAgreedChecked(false)
+  }
+
+  const handleClose = () => {
+    setOpen(false)
+    reset()
+  }
+
+  const submit = async () => {
+    if (confirmation !== '确认注销') {
+      setErr('请输入"确认注销"以确认操作')
+      return
+    }
+    setStep('submitting')
+    setErr(null)
+    try {
+      const resp = await fetch('/api/account/deactivate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ confirmation, reason: 'user_requested' }),
+      })
+      const data = await resp.json()
+      if (data.success) {
+        // 清 localStorage + 退出登录
+        logout()
+        // 跳 login 页
+        router.push('/login?deactivated=1')
+        onDeactivated()
+      } else {
+        setErr(data.error || '注销失败')
+        setStep('confirm')
+      }
+    } catch (e: any) {
+      setErr(e?.message || '网络错误')
+      setStep('confirm')
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16, marginBottom: 24, paddingBottom: 40 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 18px',
+          background: 'rgba(255, 100, 100, 0.04)',
+          border: '1px solid rgba(255, 100, 100, 0.15)',
+          borderRadius: 14,
+          color: 'rgba(255, 100, 100, 0.55)',
+          fontSize: 13, fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <span><AlertTriangle size={12} strokeWidth={1.5} style={{ marginRight: 5, verticalAlign: '-2px', display: 'inline-block' }} />️ 注销账户</span>
+        <span style={{ fontSize: 11, opacity: 0.7 }}>{open ? '收起 ▲' : '展开 ▼'}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: 10,
+          padding: '18px',
+          background: 'rgba(255, 100, 100, 0.06)',
+          border: '1px solid rgba(255, 100, 100, 0.25)',
+          borderRadius: 14,
+          color: '#fff',
+        }}>
+          {step === 'warn' && (
+            <div>
+              <div style={{ fontSize: 13, color: 'rgba(255, 100, 100, 0.95)', marginBottom: 14, lineHeight: 1.7 }}>
+                <strong style={{ fontSize: 14 }}>注销后会发生什么？</strong><br />
+                <><CheckCircle size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block', color: '#22c55e' }} /><strong>你的手机号、昵称、头像、生日、过敏史等信息会被永久清除</strong><br /></>
+                <><CheckCircle size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block', color: '#22c55e' }} />你的历史订单将被<strong>匿名化</strong>（商家看不到「是你」）<br /></>
+                <><CheckCircle size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block', color: '#22c55e' }} /><strong>积分余额（{`( 现实以你的账户为准 )`}）将被清零</strong><br /></>
+                <AlertTriangle size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block', color: '#f59e0b' }} />30 天内可拨打 <a href="tel:13721566882" style={{ color: '#b8860b' }}>13721566882</a> 申请恢复，30 天后不可恢复<br />
+                <><AlertTriangle size={11} strokeWidth={1.5} style={{ marginRight: 4, verticalAlign: '-1px', display: 'inline-block', color: '#f59e0b' }} /><strong>注销动作不可撤销</strong></>，请先确认没有进行中的订单
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 1.7, marginBottom: 14 }}>
+                本入口仅限<strong>普通用户账户</strong>。<br />
+                店员/管理员账户需通过 <a href="tel:13721566882" style={{ color: '#b8860b' }}>客服电话</a> 处理。
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={handleClose}
+                  style={{
+                    flex: 1, padding: '12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'transparent', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >取消</button>
+                <button
+                  onClick={() => setStep('confirm')}
+                  style={{
+                    flex: 1, padding: '12px', borderRadius: 10, border: 'none',
+                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                    color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >我已了解，继续</button>
+              </div>
+            </div>
+          )}
+
+          {step === 'confirm' && (
+            <div>
+              <div style={{ fontSize: 13, color: 'rgba(255, 100, 100, 0.95)', marginBottom: 12, lineHeight: 1.5, fontWeight: 600 }}>
+                最后一步：确认操作
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginBottom: 14, lineHeight: 1.6 }}>
+                请在下方输入框输入「<strong style={{ color: '#ef4444' }}>确认注销</strong>」四个字，然后点"立即注销"。
+              </div>
+              <input
+                value={confirmation}
+                onChange={(e) => setConfirmation(e.target.value)}
+                placeholder="请输入：确认注销"
+                disabled={String(step) === 'submitting'}
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255, 100, 100, 0.4)',
+                  background: 'rgba(0,0,0,0.3)',
+                  color: '#fff',
+                  fontSize: 16,
+                  fontFamily: 'inherit',
+                  marginBottom: 10,
+                  letterSpacing: '0.5px',
+                }}
+              />
+              <label style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                fontSize: 12,
+                color: 'rgba(255,255,255,0.7)',
+                marginBottom: 14,
+                lineHeight: 1.5,
+                cursor: 'pointer',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={agreedChecked}
+                  onChange={(e) => setAgreedChecked(e.target.checked)}
+                  style={{ marginTop: 3, flexShrink: 0 }}
+                />
+                <span>
+                  我已阅读并同意《<a href="/user-agreement" target="_blank" style={{ color: '#b8860b' }}>用户协议</a>》第十条及《<a href="/privacy-policy" target="_blank" style={{ color: '#b8860b' }}>隐私政策</a>》第 5.3 节条款。
+                </span>
+              </label>
+              {err && (
+                <div style={{ fontSize: 12, color: '#ef4444', marginBottom: 12, padding: '8px 10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 6 }}>
+                  <><AlertTriangle size={13} strokeWidth={1.5} style={{ marginRight: 6, verticalAlign: '-2px', display: 'inline-block' }} />{err}</>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={reset}
+                  style={{
+                    flex: 1, padding: '12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'transparent', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >返回</button>
+                <button
+                  onClick={submit}
+                  disabled={String(step) === 'submitting' || !agreedChecked || confirmation !== '确认注销'}
+                  style={{
+                    flex: 1, padding: '12px', borderRadius: 10, border: 'none',
+                    background: !agreedChecked || confirmation !== '确认注销'
+                      ? 'rgba(239, 68, 68, 0.3)'
+                      : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                    color: '#fff', fontSize: 14, fontWeight: 700,
+                    cursor: !agreedChecked || confirmation !== '确认注销' ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >{String(step) === 'submitting' ? '注销中…' : '立即注销'}</button>
+              </div>
+            </div>
+          )}
+
+          {String(step) === 'submitting' && (
+            <div style={{ padding: 20, textAlign: 'center', color: 'rgba(255,255,255,0.7)' }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}><Loader size={32} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+              <div style={{ fontSize: 13 }}>正在注销，请稍候…</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 检查 URL ?deactivated=1 并提示用户 */
+function useDeactivatedNotice() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('deactivated') === '1') {
+      window.history.replaceState({}, '', '/login')
+      setTimeout(() => {
+        toast.info('您的账户已注销。\n您的手机号 30 天后可重新注册。')
+      }, 200)
+    }
+  }, [])
+}
+
+function ProfileRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '10px 0', borderBottom: '1px solid rgba(184, 134, 11, 0.06)',
+    }}>
+      <span style={{ fontSize: '13px', color: 'rgba(184, 134, 11, 0.6)' }}>{label}</span>
+      <span style={{ fontSize: '13px', color: '#fff', fontWeight: 500 }}>{value}</span>
+    </div>
+  )
+}
+
+function EmptyState({ icon, text, sub }: { icon: string; text: string; sub: string }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '40px 0' }}>
+      <div style={{ fontSize: '40px', marginBottom: '12px' }}>{icon}</div>
+      <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '14px', margin: '0 0 4px' }}>{text}</p>
+      <p style={{ color: 'rgba(184, 134, 11, 0.4)', fontSize: '12px', margin: 0 }}>{sub}</p>
+    </div>
+  )
+}
+
+function LoadingState() {
+  return (
+    <div style={{ textAlign: 'center', padding: '40px 0' }}>
+      <div style={{ fontSize: '24px', marginBottom: '8px' }}><Loader size={24} strokeWidth={1.5} style={{ display: 'inline-block', verticalAlign: 'middle' }} /></div>
+      <p style={{ color: 'rgba(184, 134, 11, 0.5)', fontSize: '13px', margin: 0 }}>加载中...</p>
+    </div>
+  )
+}

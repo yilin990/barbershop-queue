@@ -1,0 +1,67 @@
+'use client'
+
+interface QuickQuestionsProps {
+  onSelect: (q: string) => void
+}
+
+const QUESTIONS = [
+  { label: '感冒了怎么办？', icon: '🤧' },
+  { label: '推荐感冒药', icon: '🍵' },
+  { label: '用药提醒', icon: '⏰' },
+  { label: '门店地址', icon: '📍' },
+  { label: '会员权益', icon: '🎫' },
+  { label: '儿童用药注意', icon: '👶' },
+]
+
+export default function QuickQuestions({ onSelect }: QuickQuestionsProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: '8px',
+        flexWrap: 'wrap',
+        padding: '4px 012px',
+      }}
+    >
+      {QUESTIONS.map((q, i) => (
+        <button
+          key={i}
+          onClick={() => onSelect(q.label)}
+          style={{
+            padding: '8px 14px',
+            background: 'rgba(127, 220, 148, 0.08)',
+            border: '1px solid rgba(127, 220, 148, 0.2)',
+            borderRadius: '20px',
+            fontSize: '13px',
+            color: '#7fdc94',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            transition: 'all 0.2s ease',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+          }}
+          onMouseEnter={e => {
+            ;(e.currentTarget as HTMLButtonElement).style.background =
+              'rgba(127, 220, 148, 0.18)'
+            ;(e.currentTarget as HTMLButtonElement).style.transform =
+              'translateY(-2px)'
+            ;(e.currentTarget as HTMLButtonElement).style.boxShadow =
+              '0 4px 12px rgba(0,0,0,0.2)'
+          }}
+          onMouseLeave={e => {
+            ;(e.currentTarget as HTMLButtonElement).style.background =
+              'rgba(127, 220, 148, 0.08)'
+            ;(e.currentTarget as HTMLButtonElement).style.transform =
+              'translateY(0)'
+            ;(e.currentTarget as HTMLButtonElement).style.boxShadow = 'none'
+          }}
+        >
+         <span>{q.icon}</span>
+          <span>{q.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}

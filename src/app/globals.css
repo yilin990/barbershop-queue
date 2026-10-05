@@ -1,0 +1,328 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+  /* ⭐ 2026-09-20 01:42 奕霖拍板：全局白色改暖米深棕沙龙配色 */
+  --bg-deep: #faf6f0;                                  /* 暖米背景 */
+  --bg-card: #fffaf0;                                  /* 浅米卡片 */
+  --bg-card-hover: #f5ead3;
+  --gold: #b8860b;                                    /* 主色：金棕 */
+  --gold-dark: #8b6508;
+  --gold-glow: rgba(184, 134, 11, 0.12);
+  --gold-light: #f5ead3;
+  --text: #2c1810;                                    /* 主文字深棕 */
+  --text-secondary: #5d4037;
+  --text-muted: #8d6e63;
+  --glass-border: rgba(184, 134, 11, 0.22);
+  --accent: #8b0000;                                  /* 强调暗红 */
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-deep);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+a { text-decoration: none; color: inherit; transition: color 0.3s; }
+a:hover { color: var(--gold); }
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
+
+/* ⭐ 2026-09-20 13:37 奕霖 v6：暖米主题滚动条样式 */
+#booking-section *::-webkit-scrollbar {
+  width: 6px;
+}
+#booking-section *::-webkit-scrollbar-track {
+  background: rgba(184, 134, 11, 0.08);
+  border-radius: 3px;
+}
+#booking-section *::-webkit-scrollbar-thumb {
+  background: rgba(184, 134, 11, 0.4);
+  border-radius: 3px;
+}
+#booking-section *::-webkit-scrollbar-thumb:hover {
+  background: rgba(184, 134, 11, 0.65);
+}
+#booking-section * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(184, 134, 11, 0.4) rgba(184, 134, 11, 0.08);
+}
+
+/* ===== 隐藏 Next.js 16 dev mode 浮窗（next-devtools） ===== */
+/* 浮窗默认显示在右下角（devtools-indicator 容器），遮挡商户后台界面 */
+#devtools-indicator,
+[data-nextjs-toast],
+[data-nextjs-devtools-button],
+[data-nextjs-devtools-panel-overlay],
+[data-nextjs-devtools-panel-footer],
+nextjs-portal {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* ===== PWA / Mobile 体验优化 ===== */
+/* 1. 锁定视口高度：输入法弹起不抖 */
+html {
+  height: 100%;
+  /* 安卓 Chrome 修正：只隐藏横向滚动，纵向让 body 自由滚动 */
+  overflow-x: hidden;
+  /* iOS Safari 橡皮筋 */
+  overscroll-behavior: none;
+  /* 禁止页面被下拉缩进/刷新 */
+  touch-action: manipulation;
+}
+body {
+  /* 关键修复：min-height 而非 height，让内容能撑高 body，滚动到底 */
+  min-height: 100%;
+  /* 100dvh = dynamic viewport height，浏览器地址栏收缩时跟着变 */
+  min-height: 100dvh;
+  /* 防止下拉刷新 */
+  overscroll-behavior-y: contain;
+  /* iOS 平滑滚动 */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 2. 禁用下拉刷新和边缘滑动手势 */
+/* (已合并到上面的 html 块里) */
+
+/* 3. 输入法弹出时固定底部元素 */
+@supports (height: 100dvh) {
+  body {
+    min-height: 100dvh;
+  }
+}
+
+/* 4. 修复 iOS 输入框焦点偏移 */
+input, textarea, select {
+  /* iOS Safari 缩放行为 */
+  font-size: 16px !important;
+  /* 防止 transform 偏移 */
+  transform: translateZ(0);
+}
+
+/* 5. safe-area 适配 iPhone 刘海/底部 */
+.safe-area-top { padding-top: env(safe-area-inset-top, 0); }
+.safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
+
+/* 6. PWA 启动屏防白屏 */
+@media (display-mode: standalone) {
+  /* 当作为 PWA 启动时 */
+  body {
+    /* 保持主题色背景，避免白屏闪烁 */
+    background-color: #2c1810;
+  }
+}
+
+/* 7. 优化滚动容器：输入法弹起时单独滚动而不是页面 */
+.scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+/* ========================================================================
+   8. 应用质感层（奕霖 2026-07-19 18:52 授权）
+   目标：滚动入场 / 按钮反馈 / 卡片 hover 让页面像"产品"，不是"PPT"
+   原则：零新依赖，纯 CSS + Tailwind transition utilities + IntersectionObserver
+   ======================================================================== */
+
+/* 8.1 核心 keyframes */
+@keyframes qh-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes qh-fade-up {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes qh-fade-down {
+  from { opacity: 0; transform: translate3d(0, -10px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes qh-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes qh-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes qh-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--gold-glow); }
+  50%      { box-shadow: 0 0 0 6px rgba(184, 134, 11, 0); }
+}
+
+@keyframes qh-ripple {
+  from { transform: scale(0); opacity: 0.45; }
+  to   { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes qh-cart-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+/* 8.2 进入动画 utilities（默认：JS 加 .is-visible 触发，CSS 兜底 200ms 后强制可见防白屏） */
+.qh-enter {
+  opacity: 0;
+  transform: translate3d(0, 14px, 0);
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.qh-enter.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+/* 兜底：2s 后无论是否触发都强制可见（防 IntersectionObserver 不挂载导致页面空白）*/
+.qh-enter {
+  animation: qh-safety-show 0.01s linear 2s forwards;
+}
+@keyframes qh-safety-show {
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* stagger 延迟（0-7 项够用；>7 不需要微差，由 IntersectionObserver 顺序触发的微小时间差替代）*/
+.qh-stagger-0 { transition-delay: 0ms; }
+.qh-stagger-1 { transition-delay: 40ms; }
+.qh-stagger-2 { transition-delay: 80ms; }
+.qh-stagger-3 { transition-delay: 120ms; }
+.qh-stagger-4 { transition-delay: 160ms; }
+.qh-stagger-5 { transition-delay: 200ms; }
+.qh-stagger-6 { transition-delay: 240ms; }
+.qh-stagger-7 { transition-delay: 280ms; }
+
+/* 8.3 交互反馈（按钮 / 卡片）*/
+.qh-press {
+  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 200ms ease-out,
+              background-color 180ms ease-out,
+              border-color 180ms ease-out;
+}
+.qh-press:active {
+  transform: scale(0.97);
+}
+
+.qh-card-lift {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 220ms ease-out,
+              border-color 220ms ease-out,
+              background-color 220ms ease-out;
+  will-change: transform;
+}
+.qh-card-lift:hover {
+  transform: translate3d(0, -3px, 0);
+  box-shadow: 0 10px 28px -8px rgba(184, 134, 11, 0.18),
+              0 4px 12px -4px rgba(0, 0, 0, 0.35);
+  border-color: var(--gold);
+}
+.qh-card-lift:active {
+  transform: translate3d(0, -1px, 0) scale(0.99);
+}
+
+/* 8.4 加载骨架 / shimmer */
+.qh-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.03) 0%,
+    rgba(184, 134, 11, 0.08) 50%,
+    rgba(255,255,255,0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: qh-shimmer 1.6s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* 8.5 强调发光（用在主 CTA、加入购物车反馈）*/
+.qh-glow {
+  animation: qh-pulse-glow 2.4s ease-out infinite;
+}
+
+/* 8.6 加入购物车小红点弹跳 */
+.qh-cart-pop {
+  animation: qh-cart-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 8.7 涟漪容器（点击位置扩散半透明圆）*/
+.qh-ripple-host {
+  position: relative;
+  overflow: hidden;
+}
+.qh-ripple-host > .qh-ripple {
+  position: absolute;
+  border-radius: 9999px;
+  background: var(--gold);
+  pointer-events: none;
+  transform: scale(0);
+  animation: qh-ripple 600ms ease-out forwards;
+}
+
+/* 8.8 尊重无障碍偏好（系统设了 reduce motion 就关掉所有动效）*/
+@media (prefers-reduced-motion: reduce) {
+  .qh-enter,
+  .qh-card-lift,
+  .qh-press,
+  .qh-glow,
+  .qh-cart-pop,
+  .qh-skeleton,
+  .qh-ripple-host > .qh-ripple {
+    animation: none !important;
+    transition: none !important;
+  }
+  .qh-enter { opacity: 1; transform: none; }
+  .qh-card-lift:hover { transform: none; }
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* ============================================
+   AMap InfoWindow 覆盖 · 2026-09-30 段 224
+   之前: AMap JS API runtime DOM, inline style background:#0d1f17 (墨绿)
+   现在: 暖米色背景 + 深棕字 + 金棕边框 (高对比, 契合 app 主题)
+   ============================================ */
+.amap-info-content,
+.amap-info-outer,
+.amap-info-inner,
+.amap-info-close,
+.amap-info-sharp {
+  background: rgba(255, 250, 240, 0.98) !important;
+  color: #3d2817 !important;
+  border-color: rgba(184, 134, 11, 0.6) !important;
+  box-shadow: 0 6px 20px rgba(93, 64, 55, 0.25) !important;
+}
+
+/* 内部子元素 (AMap 用 anonymous div 套 inline style) */
+.amap-info-content > div,
+.amap-info-content div[style*="background"] {
+  background: rgba(255, 250, 240, 0.98) !important;
+  color: #3d2817 !important;
+  border-radius: 8px !important;
+  padding: 14px 18px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+}
+
+.amap-info-content {
+  padding: 14px 18px !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border: 1.5px solid rgba(184, 134, 11, 0.5) !important;
+}
+
+.amap-info-close {
+  color: #b8860b !important;
+  font-size: 16px !important;
+}

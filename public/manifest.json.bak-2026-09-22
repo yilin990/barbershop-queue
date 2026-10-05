@@ -1,0 +1,58 @@
+{
+  "name": "芝林大药房 - 您的专属健康顾问",
+  "short_name": "芝林健康",
+  "description": "AI赋能 · 去中心化 · 专属服务。芝林大药房，铜仁人自己的健康顾问。",
+  "start_url": "/merchant?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0f0d",
+  "theme_color": "#7fdc94",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["health", "lifestyle", "medical"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "在线问诊",
+      "short_name": "问诊",
+      "description": "AI 药师在线问诊",
+      "url": "/pharmacist?source=pwa",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "预约服务",
+      "short_name": "预约",
+      "description": "在线预约到店服务",
+      "url": "/merchant?source=pwa&action=booking",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "我的会员",
+      "short_name": "会员",
+      "description": "查询积分和优惠券",
+      "url": "/merchant?source=pwa&action=member",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
+}

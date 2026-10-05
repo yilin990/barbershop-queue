@@ -1,0 +1,104 @@
+// ---------------------------------------------------------------------------
+// AI 找果 API v2.0 (2026-08-28 重构)
+// 奕霖反馈 /search 没数据:原版 LLM 阻塞导致页面一直 loading
+// 修法:本地词典立即匹配 → 商品查询立即返回 → LLM 异步生成 intent(可选)
+// ---------------------------------------------------------------------------
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/db'
+import { CATEGORY_CODES, SYMPTOM_TO_CATEGORY, inferCategoriesFromMessage } from '@/lib/category-mapping'
+
+export const runtime = 'nodejs'
+
+// 商品分类清单(给 LLM / 前端参考)
+const CATEGORY_HINT = Object.entries(CATEGORY_CODES)
+  .map(([code, info]) => `${code} ${info.name} ${info.keywords.slice(0, 5).join('|')}`)
+  .join('\n')
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const query = String(body.query || '').trim()
+    if (!query) {
+      return NextResponse.json({ success: false, error: 'query 不能为空' }, { status: 400 })
+    }
+
+    // ⭐ MEMORY §284 — 奕霖 2026-08-28 反馈 /search 没数据
+    // 修法:本地词典立即匹配(不等 LLM),直接返回商品
+    const localCats = inferCategoriesFromMessage(query)
+    const localCategory = localCats[0] || ''
+    const localCategoryName = localCategory ? (CATEGORY_CODES[localCategory]?.name || '') : ''
+    const localFunctionTag = Object.keys(SYMPTOM_TO_CATEGORY).find((s) => query.includes(s)) || ''
+
+    // 查商户
+    const merchants = await prisma.$queryRaw<any[]>`
+      SELECT CAST(id AS TEXT) as id FROM Merchant WHERE code = 'G0001' LIMIT 1
+    `
+    if (merchants.length === 0) {
+      return NextResponse.json({ success: false, error: '商户不存在' }, { status: 404 })
+    }
+    const merchantId = String(merchants[0].id)
+
+    // 构造 WHERE:category + functionTag + q 三层过滤
+    let where = `p.merchantId = '${merchantId}' AND p.status = 'active'`
+    if (localCategory) {
+      const safeC = localCategory.replace(/[^0-9]/g, '')
+      const safeCN = localCategoryName.replace(/'/g, '')
+      if (safeC) where += ` AND (p.category = '${safeC}' OR p.categoryLabel = '${safeC}' OR p.categoryLabel = '${safeCN}')`
+    }
+    if (localFunctionTag) {
+      const safeT = localFunctionTag.replace(/'/g, '')
+      where += ` AND p.functionTags LIKE '%${safeT}%'`
+    }
+    if (query) {
+      const safeQ = query.replace(/['"%_]/g, '')
+      where += ` AND (p.name LIKE '%${safeQ}%' OR p.shortName LIKE '%${safeQ}%' OR p.manufacturer LIKE '%${safeQ}%' OR p.functionTags LIKE '%${safeQ}%')`
+    }
+
+    const countResult = await prisma.$queryRawUnsafe<any[]>(`SELECT CAST(COUNT(*) AS INTEGER) as total FROM Product p WHERE ${where}`)
+    const total = Number(countResult[0]?.total) || 0
+    const products = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT
+         CAST(p.id AS TEXT) as id, p.name, p.shortName, p.spec,
+         CAST(p.price AS REAL) as price, CAST(p.memberPrice AS REAL) as memberPrice, CAST(p.stock AS INTEGER) as stock,
+         p.category, p.categoryLabel, p.qualityClass, p.functionTags, p.unit, p.dosage, p.manufacturer,
+         CAST(p.sales30d AS INTEGER) as sales30d, p.image,
+         p.weightGram
+       FROM Product p WHERE ${where} ORDER BY p.sales30d DESC, p.name ASC LIMIT 20`
+    )
+
+    return NextResponse.json({
+      success: true,
+      ai: {
+        query,
+        intent: localCategoryName ? `找${localCategoryName}` : `搜「${query}」`,
+        category: localCategory,
+        categoryName: localCategoryName,
+        functionTag: localFunctionTag,
+        explanation: localCategoryName
+          ? `为你找「${localCategoryName}」类商品,按销量优先`
+          : `为你搜「${query}」相关商品,按销量优先`,
+      },
+      products: products.map((p: any) => ({
+        id: String(p.id),
+        name: String(p.name || ''),
+        shortName: String(p.shortName || p.name || ''),
+        spec: p.spec ? String(p.spec) : null,
+        price: Number(p.price) || 0,
+        memberPrice: Number(p.memberPrice) || 0,
+        stock: Number(p.stock) || 0,
+        category: p.category ? String(p.category) : null,
+        categoryLabel: p.categoryLabel ? String(p.categoryLabel) : null,
+        qualityClass: p.qualityClass ? String(p.qualityClass) : null,
+        functionTags: p.functionTags ? String(p.functionTags) : null,
+        unit: p.unit ? String(p.unit) : null,
+        weightGram: Number(p.weightGram) || 0,
+        sales30d: Number(p.sales30d) || 0,
+        image: p.image ? String(p.image) : null,
+      })),
+      total,
+    })
+  } catch (e: any) {
+    console.error('[ai-search API]', e)
+    return NextResponse.json({ success: false, error: '服务器错误: ' + (e?.message ?? 'unknown') }, { status: 500 })
+  }
+}

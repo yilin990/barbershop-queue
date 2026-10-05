@@ -1,0 +1,56 @@
+{
+ "school": [
+  { "id": "poi_001", "name": "碧江附小", "category": "school", "lng": 109.184523, "lat": 27.734512, "address": "铜仁市碧江区环北街道" },
+  { "id": "poi_002", "name": "铜仁一中", "category": "school", "lng": 109.188901, "lat": 27.723445, "address": "铜仁市碧江区锦江路" },
+  { "id": "poi_003", "name": "铜仁二中", "category": "school", "lng": 109.192341, "lat": 27.719823, "address": "铜仁市碧江区共青路" },
+  { "id": "poi_004", "name": "铜仁三中", "category": "school", "lng": 109.181012, "lat": 27.727890, "address": "铜仁市碧江区" },
+  { "id": "poi_005", "name": "铜仁市民族中学", "category": "school", "lng": 109.189234, "lat": 27.731245, "address": "铜仁市碧江区" },
+  { "id": "poi_006", "name": "铜仁市实验小学", "category": "school", "lng": 109.186345, "lat": 27.730123, "address": "铜仁市碧江区" },
+  { "id": "poi_007", "name": "铜仁学院", "category": "school", "lng": 109.176234, "lat": 27.716789, "address": "铜仁市碧江区" }
+ ],
+ "hospital": [
+  { "id": "poi_101", "name": "铜仁市人民医院", "category": "hospital", "lng": 109.191234, "lat": 27.718901, "address": "铜仁市碧江区" },
+  { "id": "poi_102", "name": "铜仁市中医医院", "category": "hospital", "lng": 109.193456, "lat": 27.721234, "address": "铜仁市碧江区" },
+  { "id": "poi_103", "name": "铜仁市第二人民医院", "category": "hospital", "lng": 109.187901, "lat": 27.714567, "address": "铜仁市碧江区" },
+  { "id": "poi_104", "name": "铜仁妇女儿童医院", "category": "hospital", "lng": 109.185234, "lat": 27.725678, "address": "铜仁市碧江区" }
+ ],
+ "commercial": [
+  { "id": "poi_201", "name": "锦江广场", "category": "commercial", "lng": 109.189567, "lat": 27.729345, "address": "铜仁市碧江区锦江路" },
+  { "id": "poi_202", "name": "大十字", "category": "commercial", "lng": 109.188123, "lat": 27.730456, "address": "铜仁市碧江区大十字" },
+  { "id": "poi_203", "name": "北门", "category": "commercial", "lng": 109.185678, "lat": 27.732123, "address": "铜仁市碧江区北门" },
+  { "id": "poi_204", "name": "西门", "category": "commercial", "lng": 109.184234, "lat": 27.731456, "address": "铜仁市碧江区西门" },
+  { "id": "poi_205", "name": "金滩", "category": "commercial", "lng": 109.192345, "lat": 27.736789, "address": "铜仁市碧江区金滩" },
+  { "id": "poi_206", "name": "金码头", "category": "commercial", "lng": 109.193456, "lat": 27.737890, "address": "铜仁市碧江区金码头" },
+  { "id": "poi_207", "name": "步行街", "category": "commercial", "lng": 109.187890, "lat": 27.729012, "address": "铜仁市碧江区步行街" }
+ ],
+ "transport": [
+  { "id": "poi_301", "name": "铜仁站", "category": "transport", "lng": 109.196789, "lat": 27.724567, "address": "铜仁市碧江区火车站" },
+  { "id": "poi_302", "name": "铜仁南站", "category": "transport", "lng": 109.208901, "lat": 27.698901, "address": "铜仁市万山区" },
+  { "id": "poi_303", "name": "铜仁汽车站", "category": "transport", "lng": 109.194567, "lat": 27.725012, "address": "铜仁市碧江区" },
+  { "id": "poi_304", "name": "铜仁凤凰机场", "category": "transport", "lng": 109.312345, "lat": 27.965678, "address": "铜仁市" }
+ ],
+ "community": [
+  { "id": "poi_401", "name": "清水花园", "category": "community", "lng": 109.200123, "lat": 27.732567, "address": "铜仁市碧江区清水大道" },
+  { "id": "poi_402", "name": "金滩小区", "category": "community", "lng": 109.193234, "lat": 27.737012, "address": "铜仁市碧江区金滩" },
+  { "id": "poi_403", "name": "北门小区", "category": "community", "lng": 109.186345, "lat": 27.733234, "address": "铜仁市碧江区北门" },
+  { "id": "poi_404", "name": "江华国际", "category": "community", "lng": 109.184567, "lat": 27.728901, "address": "铜仁市碧江区" },
+  { "id": "poi_405", "name": "碧江花园", "category": "community", "lng": 109.187234, "lat": 27.734567, "address": "铜仁市碧江区" },
+  { "id": "poi_406", "name": "环北小区", "category": "community", "lng": 109.183901, "lat": 27.735890, "address": "铜仁市碧江区环北" },
+  { "id": "poi_407", "name": "东太小区", "category": "community", "lng": 109.192123, "lat": 27.731456, "address": "铜仁市碧江区东太" }
+ ],
+ "landmark": [
+  { "id": "poi_501", "name": "东山", "category": "landmark", "lng": 109.200123, "lat": 27.745678, "address": "铜仁市碧江区东山" },
+  { "id": "poi_502", "name": "锦江", "category": "landmark", "lng": 109.190123, "lat": 27.726789, "address": "铜仁市碧江区锦江" },
+  { "id": "poi_503", "name": "大明边城", "category": "landmark", "lng": 109.175234, "lat": 27.708901, "address": "铜仁市碧江区" },
+  { "id": "poi_504", "name": "三江公园", "category": "landmark", "lng": 109.188234, "lat": 27.723456, "address": "铜仁市碧江区" },
+  { "id": "poi_505", "name": "十里锦江", "category": "landmark", "lng": 109.195678, "lat": 27.732345, "address": "铜仁市碧江区" }
+ ],
+ "other_zhilin": [
+  { "id": "poi_601", "name": "造型师助手（碧江店）", "category": "pharmacy", "lng": 109.200269, "lat": 27.732818, "address": "铜仁市碧江区清水大道清水花园" },
+  { "id": "poi_602", "name": "造型师助手（北门店）", "category": "pharmacy", "lng": 109.186012, "lat": 27.733012, "address": "铜仁市碧江区北门" },
+  { "id": "poi_603", "name": "造型师助手（步行街店）", "category": "pharmacy", "lng": 109.188012, "lat": 27.729345, "address": "铜仁市碧江区步行街" },
+  { "id": "poi_604", "name": "老百姓大药房", "category": "pharmacy", "lng": 109.189345, "lat": 27.728901, "address": "铜仁市碧江区" },
+  { "id": "poi_605", "name": "一树药业", "category": "pharmacy", "lng": 109.187890, "lat": 27.730123, "address": "铜仁市碧江区" },
+  { "id": "poi_606", "name": "康佰家大药房", "category": "pharmacy", "lng": 109.185890, "lat": 27.731567, "address": "铜仁市碧江区" }
+ ]
+}

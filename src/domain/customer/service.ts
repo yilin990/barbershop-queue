@@ -1,0 +1,299 @@
+/**
+ * 顾客/用户 domain — 抽离 auth + 用户档案 + 会员等级（2026-07-25 by 清禾）
+ *
+ * 包含：
+ *   - sendVerificationCode   发验证码（限频 + SMS 发送 + 记录）
+ *   - verifyCodeAndLogin     验证码 + 自动注册 + JWT mint
+ *   - getUserByToken         验 JWT + 拿 user
+ *   - getUserSummary         /me/summary 数据（等级 + 积分 + 下一级进度）
+ *   - calcNextTier           下一级计算（纯函数）
+ *
+ * 复用：所有消费页用户体系（药房/超市/美业）都走这个文件
+ */
+
+import { prisma } from '@/lib/db'
+import { generateCode, sendSmsCode, isValidPhone } from '@/lib/sms'
+import { signToken, extractToken, verifyToken } from '@/lib/jwt'
+import { ValidationError, AuthError, NotFoundError, RateLimitError } from '@/lib/error'
+
+// ============== 会员等级配置（与 membership/tier 同步） ==============
+
+export const ROLE_CONFIG: Record<string, { name: string; icon: string; minSpent: number }> = {
+  '普通': { name: '普通', icon: '🌱', minSpent: 0 },
+  '银卡': { name: '银卡', icon: '🥈', minSpent: 500 },
+  '金卡': { name: '金卡', icon: '🥇', minSpent: 2000 },
+  'VIP':  { name: 'VIP',  icon: '👑', minSpent: 10000 },
+}
+const ROLE_ORDER = ['普通', '银卡', '金卡', 'VIP']
+
+/**
+ * 下一级计算（纯函数，可单测）
+ */
+export function calcNextTier(currentRoleName: string, totalSpent: number) {
+  const currentIdx = ROLE_ORDER.indexOf(currentRoleName)
+  if (currentIdx === -1 || currentIdx === ROLE_ORDER.length - 1) {
+    return { tier: null as any, need: 0, progress: 100 }
+  }
+  const nextName = ROLE_ORDER[currentIdx + 1]
+  const nextTierConfig = ROLE_CONFIG[nextName]
+  const currentMinSpent = ROLE_CONFIG[ROLE_ORDER[currentIdx]].minSpent
+  const need = nextTierConfig.minSpent - totalSpent
+  const range = nextTierConfig.minSpent - currentMinSpent
+  const progress = range > 0
+    ? Math.min(100, Math.max(0, ((totalSpent - currentMinSpent) / range) * 100))
+    : 0
+  return {
+    tier: nextTierConfig,
+    need: Math.max(0, need),
+    progress,
+  }
+}
+
+// ============== Type 定义 ==============
+
+export interface SendCodeResult {
+  success: boolean
+  devCode?: string  // 仅 dev / SHOW_DEV_CODE=true 时返回
+  message?: string
+}
+
+export interface LoginResult {
+  success: boolean
+  token: string
+  user: {
+    id: string
+    phone: string
+    nickname: string
+    avatar: string
+    role: string
+    points: number
+    createdAt: string
+    lastLoginAt: string
+  }
+}
+
+// ============== 发验证码 ==============
+
+/**
+ * 发送手机验证码
+ * 限制：1 分钟内同手机号不能重复发
+ */
+export async function sendVerificationCode(phone: string, ip = 'unknown'): Promise<SendCodeResult> {
+  if (!phone || !isValidPhone(phone)) {
+    throw new ValidationError('请输入正确的手机号')
+  }
+
+  // 限频：1 分钟内只能发 1 条
+  const recent = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM PhoneVerification
+    WHERE phone = ${phone} AND used = 0 AND expiresAt > datetime('now')
+    ORDER BY createdAt DESC LIMIT 1
+  `
+  if (recent.length > 0) {
+    throw new RateLimitError('发送太频繁，请稍后再试')
+  }
+
+  // 生成 6 位验证码
+  const code = generateCode()
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString() // ⭐ v0.8.67: 统一 UTC ISO 字符串,跨时区一致
+
+  await prisma.phoneVerification.create({
+    data: { phone, code, expiresAt, used: false },
+  })
+
+  // 发送 SMS（dev 模式返回成功 + devCode）
+  const smsResult = await sendSmsCode(phone, code)
+
+  await prisma.smsLog.create({
+    data: {
+      phone,
+      code,
+      status: smsResult.success ? 'sent' : 'failed',
+      ip,
+    },
+  })
+
+  if (!smsResult.success) {
+    throw new Error('短信发送失败，请稍后再试')
+  }
+
+  // dev / SHOW_DEV_CODE=true 时返回 devCode（奕霖 2026-07-03 加）
+  const showDevCode =
+    process.env.NODE_ENV !== 'production' ||
+    process.env.SHOW_DEV_CODE === 'true'
+
+  return {
+    success: true,
+    message: '验证码已发送',
+    ...(showDevCode ? { devCode: code } : {}),
+  }
+}
+
+// ============== 验证码 + 登录 ==============
+
+/**
+ * 验证手机号 + 验证码 + 自动注册/登录 + mint JWT
+ */
+export async function verifyCodeAndLogin(phone: string, code: string): Promise<LoginResult> {
+  if (!phone || !code) {
+    throw new ValidationError('手机号和验证码不能为空')
+  }
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    throw new ValidationError('手机号格式不正确')
+  }
+  if (!/^\d{6}$/.test(code)) {
+    throw new ValidationError('验证码必须是6位数字')
+  }
+
+  // 1. 验证
+  const verification = await prisma.phoneVerification.findFirst({
+    where: {
+      phone,
+      code,
+      used: false,
+      expiresAt: { gt: new Date().toISOString() },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (!verification) {
+    throw new AuthError('验证码错误或已过期')
+  }
+
+  // 2. 标记使用
+  await prisma.phoneVerification.update({
+    where: { id: verification.id },
+    data: { used: true },
+  })
+
+  // 3. 找/建 User
+  let user = await prisma.user.findUnique({ where: { phone } })
+  if (!user) {
+    const last4 = phone.slice(-4)
+    const defaultNicknames = ['铜仁街坊', '健康邻里', '社区居民', '养生达人', '健康卫士']
+    const nickname = defaultNicknames[Math.floor(Math.random() * defaultNicknames.length)]
+    user = await prisma.user.create({
+      data: {
+        phone,
+        nickname: `${nickname}${last4}`,
+        avatar: ['🌿', '🍵', '🍀', '🌱', '🩺'][Math.floor(Math.random() * 5)],
+        role: '普通',
+        points: 0,
+      },
+    })
+  } else {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date().toISOString() },
+    })
+  }
+
+  // 4. mint JWT
+  const token = signToken({
+    userId: user.id,
+    phone: user.phone,
+    role: user.role,
+  })
+
+  return {
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      phone: user.phone,
+      nickname: user.nickname,
+      avatar: user.avatar,
+      role: user.role,
+      points: user.points,
+      createdAt: user.createdAt.toISOString(),
+      lastLoginAt: user.lastLoginAt.toISOString(),
+    },
+  }
+}
+
+// ============== 通过 token 拿 user ==============
+
+export async function getUserByToken(token: string) {
+  const payload = verifyToken(token)
+  if (!payload) return null
+
+  const userRows = await prisma.$queryRaw<any[]>`
+    SELECT id, phone, nickname, avatar, role, points, createdAt, lastLoginAt
+    FROM User WHERE id = ${payload.userId} LIMIT 1
+  `
+  if (userRows.length === 0) return null
+  return userRows[0]
+}
+
+// ============== /me/summary 数据 ==============
+
+export async function getUserSummary(token?: string) {
+  // 真用户
+  if (token) {
+    const u = await getUserByToken(token)
+    if (u) {
+      const customerRows = await prisma.$queryRaw<any[]>`
+        SELECT totalSpent, totalOrders, points, nickname, avatar
+        FROM Customer WHERE phone = ${u.phone} LIMIT 1
+      `
+      const totalSpent = Number(customerRows[0]?.totalSpent || 0)
+      const totalOrders = Number(customerRows[0]?.totalOrders || 0)
+      // ⭐ 2026-08-02 15:31 奕霖反馈：积分必须用 Customer（POS 源数据），不用 User
+      const points = Number(customerRows[0]?.points ?? u.points ?? 0)
+      // ⭐ 奕霖 2026-10-04 双积分体系：本店积分 (Customer.points = IP) vs 通用积分 (User.points = UP)
+      const customerPoints = Number(customerRows[0]?.points ?? 0)
+      const userPoints = Number(u.points ?? 0)
+      // 如果 Customer 有数据，Customer.nickname 优先（POS 改的）；否则 User.nickname
+      const nickname = customerRows[0]?.nickname || u.nickname
+      const avatar = customerRows[0]?.avatar || u.avatar
+      const role = u.role || '普通'
+      // ⭐ 2026-08-02 15:55 修复：Customer 表无 tier 列，用 computeTier 函数计算
+      const tierName = totalSpent >= 5000 ? 'VIP' : totalSpent >= 2000 ? '金卡' : totalSpent >= 500 ? '银卡' : '普通'
+      const nt = calcNextTier(role, totalSpent)
+      return {
+        success: true,
+        isDemo: false,
+        user: {
+          id: u.id, phone: u.phone, nickname, avatar,
+          role, points, totalSpent, totalOrders, tier: tierName,
+          // ⭐ 奕霖 2026-10-04：双积分语义清晰区分
+          customerPoints, // 本店积分（IP）— 收银台返的,只能本店用
+          userPoints,     // 通用积分（UP）— 跨店通用,下一步计划
+        },
+        nextTier: nt.tier
+          ? { name: nt.tier.name, icon: nt.tier.icon, minSpent: nt.tier.minSpent, need: nt.need, progress: nt.progress }
+          : null,
+      }
+    }
+  }
+
+  // Demo 模式：固定 13800138000（奕霖 2026-09-06 升级：真实演示账户,有 Customer 记录 + PointsLog 流水）
+  const userRows = await prisma.$queryRaw<any[]>`
+    SELECT id, phone, nickname, avatar, role, points, createdAt
+    FROM User WHERE phone = '13800138000' LIMIT 1
+  `
+  if (userRows.length === 0) {
+    return { success: true, isDemo: true, empty: true, user: null }
+  }
+
+  const u = userRows[0]
+  const customerRows = await prisma.$queryRaw<any[]>`
+    SELECT totalSpent, totalOrders, points FROM Customer WHERE phone = ${u.phone} LIMIT 1
+  `
+  const totalSpent = Number(customerRows[0]?.totalSpent || 0)
+  const totalOrders = Number(customerRows[0]?.totalOrders || 0)
+  const role = u.role || '普通'
+  const nt = calcNextTier(role, totalSpent)
+
+  return {
+    success: true,
+    isDemo: true,
+    user: {
+      id: u.id, phone: u.phone, nickname: u.nickname, avatar: u.avatar,
+      role, points: Number(u.points || 0), totalSpent, totalOrders,
+    },
+    nextTier: nt.tier
+      ? { name: nt.tier.name, icon: nt.tier.icon, minSpent: nt.tier.minSpent, need: nt.need, progress: nt.progress }
+      : null,
+  }
+}

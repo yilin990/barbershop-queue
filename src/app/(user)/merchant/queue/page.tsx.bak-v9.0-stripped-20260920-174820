@@ -1,0 +1,461 @@
+'use client'
+
+/**
+ * /merchant/queue - 实时排队独立页面
+ * ⭐ 2026-09-20 17:36 奕霖拍板：把实时排队从 modal 改成独立路由
+ *
+ * 设计：
+ * - 顶部返回 + 标题
+ * - 4 大入口（预约/取号/协议/我的）
+ * - 实时排队列表（toggle: 时间/全部）
+ * - 店长模式入口（绿色按钮）
+ * - 底部 4 入口快捷
+ */
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import AppLayout from '@/components/AppLayout'
+import { BUSINESS_CONFIG } from '@/config/business.config'
+
+// ⭐ 复用 page.tsx 主题色（保持一致）
+const PRIMARY = '#b8860b'
+const PRIMARY_RGBA = '184, 134, 11'
+
+// ==============================================
+// 订单类型 + 初始数据（从 page.tsx 同步过来）
+// ==============================================
+type OrderStatus = 'reserved' | 'arrived' | 'serving' | 'completed' | 'no_show'
+
+interface Order {
+  id: string
+  customerName: string
+  customerPhone: string
+  service: '剪发' | '烫发' | '染发' | '护理'
+  stylistName: string
+  status: OrderStatus
+  scheduledAt: string
+  scheduledDate: 'today' | 'tomorrow' | 'dayAfter'
+  arrivedAt?: string
+  startedAt?: string
+  completedAt?: string
+  note?: string
+}
+
+const INITIAL_ORDERS: Order[] = [
+  { id: 'O001', customerName: '李先生', customerPhone: '138****1234', service: '烫发', stylistName: 'Tony', status: 'serving', scheduledAt: '14:00', scheduledDate: 'today', startedAt: '14:05' },
+  { id: 'O002', customerName: '王女士', customerPhone: '139****5678', service: '剪发', stylistName: 'Amy', status: 'arrived', scheduledAt: '14:30', scheduledDate: 'today', arrivedAt: '14:28' },
+  { id: 'O008', customerName: '周先生', customerPhone: '139****6789', service: '剪发', stylistName: 'Lily', status: 'arrived', scheduledAt: '15:00', scheduledDate: 'today', arrivedAt: '14:50' },
+  { id: 'O003', customerName: '张先生', customerPhone: '138****9012', service: '染发', stylistName: 'Lily', status: 'reserved', scheduledAt: '15:00', scheduledDate: 'today' },
+  { id: 'O004', customerName: '陈女士', customerPhone: '136****3456', service: '护理', stylistName: 'Tony', status: 'reserved', scheduledAt: '16:00', scheduledDate: 'today' },
+  { id: 'O005', customerName: '李先生', customerPhone: '138****1234', service: '烫发', stylistName: 'Tony', status: 'reserved', scheduledAt: '16:00', scheduledDate: 'tomorrow', note: '明天下午 4 点' },
+  { id: 'O006', customerName: '赵女士', customerPhone: '137****7890', service: '剪发', stylistName: 'Lily', status: 'reserved', scheduledAt: '15:30', scheduledDate: 'tomorrow' },
+  { id: 'O007', customerName: '孙先生', customerPhone: '135****2345', service: '染发', stylistName: 'Amy', status: 'reserved', scheduledAt: '17:00', scheduledDate: 'tomorrow' },
+  { id: 'O009', customerName: '钱女士', customerPhone: '135****1111', service: '剪发', stylistName: 'Amy', status: 'reserved', scheduledAt: '15:30', scheduledDate: 'today' },
+  { id: 'O010', customerName: '郑先生', customerPhone: '136****2222', service: '烫发', stylistName: 'Tony', status: 'reserved', scheduledAt: '16:30', scheduledDate: 'today' },
+  { id: 'O011', customerName: '吴女士', customerPhone: '137****3333', service: '染发', stylistName: 'Lily', status: 'reserved', scheduledAt: '17:00', scheduledDate: 'today' },
+  { id: 'O012', customerName: '冯先生', customerPhone: '138****4444', service: '护理', stylistName: 'Amy', status: 'reserved', scheduledAt: '17:30', scheduledDate: 'today' },
+  { id: 'O013', customerName: '陈女士', customerPhone: '139****5555', service: '剪发', stylistName: 'Tony', status: 'reserved', scheduledAt: '18:00', scheduledDate: 'today' },
+  { id: 'O014', customerName: '韩女士', customerPhone: '135****6666', service: '烫发', stylistName: 'Lily', status: 'reserved', scheduledAt: '18:30', scheduledDate: 'today' },
+]
+
+function statusLabel(s: OrderStatus): { text: string; bg: string; color: string } {
+  switch (s) {
+    case 'reserved': return { text: '已预约', bg: 'rgba(184, 134, 11, 0.15)', color: '#8b6508' }
+    case 'arrived': return { text: '已到店', bg: 'rgba(45, 125, 50, 0.15)', color: '#2e7d32' }
+    case 'serving': return { text: '正在服务', bg: 'rgba(184, 134, 11, 0.95)', color: '#fff' }
+    case 'completed': return { text: '已完成', bg: 'rgba(139, 0, 0, 0.15)', color: '#8b0000' }
+    case 'no_show': return { text: '未到店', bg: 'rgba(141, 110, 99, 0.2)', color: '#5d4037' }
+  }
+}
+
+export default function QueuePage() {
+  const router = useRouter()
+
+  // 主题色
+  const t = {
+    bgDeep: '#faf6f0',
+    bgCard: '#fffaf0',
+    primary: PRIMARY,
+    primaryDark: '#8b6508',
+    primaryGlow: 'rgba(184, 134, 11, 0.12)',
+    text: '#2c1810',
+    textSecondary: '#5d4037',
+    textMuted: '#8d6e63',
+    border: 'rgba(184, 134, 11, 0.22)',
+    accent: '#8b0000',
+    success: '#2e7d32',
+    successGlow: 'rgba(46, 125, 50, 0.15)',
+  }
+
+  // 实时数据
+  const [orders] = useState<Order[]>(INITIAL_ORDERS)
+  const [now, setNow] = useState(() => new Date())
+
+  // 时间同步
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  // 视图切换
+  const [queueView, setQueueView] = useState<'flat' | 'byStylist'>('flat')
+
+  // 4 大入口弹窗
+  const [modal, setModal] = useState<null | 'booking' | 'ticket' | 'agreement' | 'mine'>(null)
+
+  // 派生数据
+  const servingOrders = orders.filter(o => o.status === 'serving')
+  const arrivedOrders = orders.filter(o => o.status === 'arrived').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  const reservedTodayOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'today').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  const reservedTomorrowOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'tomorrow').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  const activeOrders = orders.filter(o => o.status === 'serving' || o.status === 'arrived' || o.status === 'reserved')
+  const currentServing = servingOrders[0]
+
+  // 格式化时间
+  const timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' })
+  const dateStr = now.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Shanghai' })
+  const weekdayStr = '星期' + ['日','一','二','三','四','五','六'][now.getDay()]
+
+  return (
+    <AppLayout>
+      {/* 顶部 Header */}
+      <div style={{
+        background: `linear-gradient(180deg, ${t.bgDeep} 0%, ${t.bgCard} 100%)`,
+        borderBottom: `1px solid ${t.border}`,
+        padding: '12px 16px',
+        display: 'flex', alignItems: 'center', gap: 12,
+        position: 'sticky', top: 0, zIndex: 10,
+      }}>
+        <button
+          onClick={() => router.push('/merchant')}
+          style={{
+            background: 'rgba(184, 134, 11, 0.12)',
+            border: 'none', borderRadius: '50%',
+            width: 36, height: 36,
+            color: t.primary, fontSize: 18, fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >←</button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>🚶 实时排队</div>
+          <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
+            {dateStr} {weekdayStr} · {timeStr} · 中国时间
+          </div>
+        </div>
+      </div>
+
+      {/* 主内容 */}
+      <div style={{ padding: '16px', background: t.bgDeep, minHeight: 'calc(100dvh - 64px)' }}>
+        <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          {/* 当前正在服务大卡片 */}
+          {currentServing && (
+            <div style={{
+              marginBottom: 18,
+              padding: '20px 22px',
+              background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.95), rgba(139, 101, 8, 0.95))',
+              borderRadius: 14,
+              color: '#fff',
+              boxShadow: '0 6px 24px rgba(184, 134, 11, 0.3)',
+            }}>
+              <div style={{ fontSize: 11, opacity: 0.9, letterSpacing: '0.05em', marginBottom: 6 }}>
+                正在服务
+              </div>
+              <div style={{
+                fontSize: 36, fontWeight: 900, fontFamily: 'monospace',
+                letterSpacing: '0.05em', lineHeight: 1.1, marginBottom: 10,
+              }}>
+                {currentServing.scheduledAt}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>
+                {currentServing.customerName} · {currentServing.stylistName}
+              </div>
+              <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 10 }}>
+                {currentServing.service}
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.85 }}>
+                开始于 {currentServing.startedAt}
+              </div>
+            </div>
+          )}
+
+          {/* 4 大功能入口 */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: 10, marginBottom: 18,
+          }}>
+            <button onClick={() => setModal('booking')} style={{
+              padding: '14px 8px',
+              background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.18), rgba(184, 134, 11, 0.05))',
+              border: '1.5px solid rgba(184, 134, 11, 0.4)',
+              borderRadius: 12, color: t.primary,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              <span style={{ fontSize: 22 }}>📅</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>预约服务</span>
+              <span style={{ fontSize: 10, opacity: 0.75 }}>选发型师 · 选时段</span>
+            </button>
+            <button onClick={() => setModal('ticket')} style={{
+              padding: '14px 8px',
+              background: 'linear-gradient(135deg, rgba(46, 125, 50, 0.15), rgba(46, 125, 50, 0.05))',
+              border: '1.5px solid rgba(46, 125, 50, 0.35)',
+              borderRadius: 12, color: t.success,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              <span style={{ fontSize: 22 }}>🎫</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>现场取号</span>
+              <span style={{ fontSize: 10, opacity: 0.75 }}>到店再取号</span>
+            </button>
+            <button onClick={() => setModal('agreement')} style={{
+              padding: '14px 8px',
+              background: 'rgba(184, 134, 11, 0.08)',
+              border: '1px solid rgba(184, 134, 11, 0.22)',
+              borderRadius: 12, color: t.textSecondary,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              <span style={{ fontSize: 22 }}>📋</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>查看协议</span>
+              <span style={{ fontSize: 10, opacity: 0.75 }}>预约 · 取消规则</span>
+            </button>
+            <button onClick={() => setModal('mine')} style={{
+              padding: '14px 8px',
+              background: 'rgba(139, 0, 0, 0.08)',
+              border: '1px solid rgba(139, 0, 0, 0.25)',
+              borderRadius: 12, color: t.accent,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              <span style={{ fontSize: 22 }}>👤</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>我的预约</span>
+              <span style={{ fontSize: 10, opacity: 0.75 }}>查询 · 取消</span>
+            </button>
+          </div>
+
+          {/* 重要提示 */}
+          <div style={{
+            padding: '12px 14px',
+            background: 'rgba(46, 125, 50, 0.08)',
+            border: '1px solid rgba(46, 125, 50, 0.22)',
+            borderRadius: 10,
+            fontSize: 12, color: t.success,
+            lineHeight: 1.6, marginBottom: 18,
+          }}>
+            🛡 <b>预约提示</b>：预约请提前 5 分钟到店 · 晚到 2 分钟 系统自动取消 · 线上预约与线下排队互斥
+          </div>
+
+          {/* 实时排队列表 + View 切换 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 12, flexWrap: 'wrap', gap: 8,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: t.text }}>🚶 实时排队</span>
+              <span style={{
+                fontSize: 14, fontWeight: 800, color: t.primary,
+                padding: '2px 8px',
+                background: 'rgba(184, 134, 11, 0.15)',
+                borderRadius: 12,
+              }}>{arrivedOrders.length + reservedTodayOrders.length}</span>
+              <span style={{ fontSize: 12, color: t.textMuted }}>人在排队</span>
+            </div>
+            <div style={{ display: 'flex', background: t.bgCard, border: `1px solid ${t.border}`, borderRadius: 6, padding: 2 }}>
+              {(['flat', 'byStylist'] as const).map(v => (
+                <button key={v} onClick={() => setQueueView(v)} style={{
+                  padding: '4px 10px',
+                  background: queueView === v ? t.primary : 'transparent',
+                  color: queueView === v ? '#fff' : t.textMuted,
+                  border: 'none', borderRadius: 4,
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                }}>{v === 'flat' ? '时间' : '全部'}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 排队列表 */}
+          {queueView === 'flat' ? (
+            <div style={{
+              background: t.bgCard,
+              border: `1px solid ${t.border}`,
+              borderRadius: 12, padding: 12,
+              marginBottom: 18,
+            }}>
+              {[...arrivedOrders, ...reservedTodayOrders].map((o, i) => {
+                const badge = statusLabel(o.status)
+                return (
+                  <div key={o.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 6px',
+                    borderBottom: i < arrivedOrders.length + reservedTodayOrders.length - 1 ? `1px solid ${t.border}` : 'none',
+                  }}>
+                    <div style={{
+                      padding: '4px 10px',
+                      background: 'rgba(46, 125, 50, 0.12)',
+                      border: '1px solid rgba(46, 125, 50, 0.3)',
+                      borderRadius: 8,
+                      fontSize: 13, fontWeight: 700, color: t.success,
+                      fontFamily: 'monospace', minWidth: 56, textAlign: 'center',
+                    }}>{o.scheduledAt}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{o.customerName}</div>
+                      <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
+                        {o.service} · {o.stylistName} 老师 · <span style={{
+                          padding: '1px 6px', borderRadius: 6,
+                          background: badge.bg, color: badge.color,
+                          fontSize: 10, fontWeight: 600,
+                        }}>{badge.text}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+              marginBottom: 18,
+            }}>
+              {(['Tony', 'Amy', 'Lily'] as const).map(stylist => {
+                const myOrders = [...arrivedOrders, ...reservedTodayOrders].filter(o => o.stylistName === stylist)
+                return (
+                  <div key={stylist} style={{
+                    background: t.bgCard,
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 10, padding: 10,
+                  }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      marginBottom: 8,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{stylist}</div>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: t.primary,
+                        padding: '1px 6px', borderRadius: 8,
+                        background: 'rgba(184, 134, 11, 0.15)',
+                      }}>{myOrders.length}</span>
+                    </div>
+                    {myOrders.length === 0 ? (
+                      <div style={{ fontSize: 11, color: t.textMuted, textAlign: 'center', padding: 8 }}>
+                        😊 暂无
+                      </div>
+                    ) : (
+                      myOrders.slice(0, 4).map(o => (
+                        <div key={o.id} style={{
+                          padding: '4px 0',
+                          fontSize: 11, color: t.textSecondary,
+                        }}>
+                          <span style={{ fontFamily: 'monospace', color: t.success, fontWeight: 600 }}>{o.scheduledAt}</span>
+                          {' '}{o.customerName.slice(0, 4)}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* 明日预约列表（精简） */}
+          {reservedTomorrowOrders.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{
+                fontSize: 13, fontWeight: 700, color: t.text,
+                marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span>📅</span> 明日预约 <span style={{ fontSize: 11, color: t.textMuted }}>({reservedTomorrowOrders.length})</span>
+              </div>
+              <div style={{
+                background: t.bgCard,
+                border: `1px solid ${t.border}`,
+                borderRadius: 12, padding: 12,
+              }}>
+                {reservedTomorrowOrders.slice(0, 3).map((o, i) => (
+                  <div key={o.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 0',
+                    fontSize: 12, color: t.text,
+                    borderBottom: i < Math.min(2, reservedTomorrowOrders.length - 1) ? `1px solid ${t.border}` : 'none',
+                  }}>
+                    <span style={{
+                      fontFamily: 'monospace', fontWeight: 700, color: t.primary,
+                      minWidth: 50,
+                    }}>{o.scheduledAt}</span>
+                    <span style={{ flex: 1 }}>{o.customerName} · {o.stylistName}</span>
+                    <span style={{ fontSize: 10, color: t.textMuted }}>{o.service}</span>
+                  </div>
+                ))}
+                {reservedTomorrowOrders.length > 3 && (
+                  <div style={{
+                    fontSize: 11, color: t.textMuted, textAlign: 'center', marginTop: 6,
+                  }}>+ {reservedTomorrowOrders.length - 3} 单明日预约</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 店长模式入口 */}
+          <div style={{
+            marginTop: 24, padding: '14px 18px',
+            background: 'linear-gradient(135deg, rgba(46, 125, 50, 0.15), rgba(46, 125, 50, 0.05))',
+            border: '1.5px solid rgba(46, 125, 50, 0.4)',
+            borderRadius: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 12, flexWrap: 'wrap',
+          }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: t.success }}>🛡 店长模式</div>
+              <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
+                {activeOrders.length} 单进行中 · 操作确认/完成/叫号
+              </div>
+            </div>
+            <button onClick={() => alert('PIN 验证中...（MVP 占位）')} style={{
+              padding: '10px 18px',
+              background: 'linear-gradient(135deg, #2e7d32, #1b5e20)',
+              color: '#fff', border: 'none', borderRadius: 10,
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}>开启店长模式</button>
+          </div>
+        </div>
+      </div>
+
+      {/* 4 大入口弹窗（精简版：只显示标题 + 占位） */}
+      {modal && (
+        <div onClick={() => setModal(null)} style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.78)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16, zIndex: 1100,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: 'linear-gradient(180deg, #faf6f0 0%, #fffaf0 100%)',
+            borderRadius: 16, padding: 24,
+            width: '100%', maxWidth: 420,
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>
+              {modal === 'booking' ? '📅' : modal === 'ticket' ? '🎫' : modal === 'agreement' ? '📋' : '👤'}
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 6 }}>
+              {modal === 'booking' ? '在线预约' : modal === 'ticket' ? '现场取号' : modal === 'agreement' ? '预约协议' : '我的预约'}
+            </div>
+            <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 16, lineHeight: 1.6 }}>
+              {modal === 'booking' ? '选发型师 · 选时段 · 系统自动锁位' :
+               modal === 'ticket' ? '到店再取号 · 系统自动排位' :
+               modal === 'agreement' ? '预约请提前 5 分钟到店 · 晚到 2 分钟自动取消' :
+               '查询 · 取消您已预约的服务'}
+            </div>
+            <button onClick={() => setModal(null)} style={{
+              padding: '10px 20px',
+              background: t.primary, color: '#fff',
+              border: 'none', borderRadius: 10,
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}>我知道了</button>
+          </div>
+        </div>
+      )}
+    </AppLayout>
+  )
+}

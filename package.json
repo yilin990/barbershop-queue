@@ -1,0 +1,49 @@
+{
+  "name": "barber-qingheos",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3020",
+    "build": "next build",
+    "start": "next start -p 3070",
+    "lint": "eslint",
+    "postinstall": "npm rebuild better-sqlite3 || echo '[postinstall] better-sqlite3 rebuild failed - run npm rebuild better-sqlite3 manually if app fails to start'",
+    "dev:3001": "next dev -p 3001",
+    "dev:3070": "next dev -p 3070 -H 0.0.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.101.0",
+    "@iconify-json/material-symbols": "^1.2.94",
+    "@iconify/react": "^6.0.2",
+    "@libsql/client": "^0.17.3",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/adapter-libsql": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@types/qrcode": "^1.5.6",
+    "@zxing/browser": "^0.1.5",
+    "anthropic": "^0.0.0",
+    "better-sqlite3": "^12.10.0",
+    "exceljs": "^4.4.0",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.24.0",
+    "next": "16.2.6",
+    "prisma": "^7.8.0",
+    "qrcode": "^1.5.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "sharp": "^0.35.4",
+    "xlsx": "^0.18.5",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

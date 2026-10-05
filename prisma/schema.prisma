@@ -1,0 +1,669 @@
+// 穗(Sui)多租户私域平台 - Prisma Schema v1.0
+// 2026-06-10 - 基于芝林大药房 25 列核心数据
+//
+// 架构:
+//   - Merchant(商家/店铺)= 多租户隔离
+//   - Product(商品)= 25 列核心字段
+//   - Activity(活动)= 活动展示页
+//   - Order(订单)= 下单闭环
+//   - PointsLog(积分流水)= 积分系统
+//   - RestockRequest(上报进货)= 解决 73% 缺货率
+//   - Customer(用户)= 客户档案
+//   - 已有:User/PhoneVerification/Comment/Reply/Feedback/SmsLog(社区/反馈/验证码)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ============================================================
+// 1. Merchant(商家/店铺)- 多租户核心
+// ============================================================
+model Merchant {
+  id          String   @id @default(cuid())
+  code        String   @unique              // 业务机构编码(如 0005 = 碧江附小芝林大药房)
+  name        String                         // 商家名称
+  shortName   String?                        // 简称
+  logo        String?                        // LOGO URL
+  phone       String?                        // 联系电话
+  address     String?                        // 店铺地址
+  latitude    Float?                         // 地图纬度
+  longitude   Float?                         // 地图经度
+  businessHours String? @default("08:00-21:00")  // 营业时间
+
+  // ⭐ 2026-08-09 奕霖拍板：跨行业 SaaS = Merchant.industry 字段
+  // pharmacy（医药/默认）| grocery（果蔬）| beauty（美容美甲）| fitness（健身）| restaurant（餐饮）| barber（理发/美发 · 2026-09-20 奕霖立项）
+  // ⭐ 2026-09-20 奕霖立项：理发 SaaS，qingheos 第一单熟人理发店，AI 老板助理定位，299-999 元/年
+  industry    String   @default("pharmacy")
+
+  // 主题色(vibe coding 定制)
+  primaryColor String? @default("#0A2818")
+  accentColor  String? @default("#C9A961")
+
+  // ⭐ 行业配置（JSON: themeOverrides / aiPromptKey / categoryMap / 字段开关）
+  industryConfig String?
+
+  // 配置
+  pointsRate    Float  @default(0.05)        // 返积分比例(5% = 默认)
+  pointValue    Float  @default(0.01)        // 1 积分 = 0.01 元
+  minPointsRedeem Int  @default(100)         // 最低兑换积分
+
+  // 状态
+  status      String   @default("active")    // active | paused | closed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products      Product[]
+  services      Service[]
+  activities    Activity[]
+  orders        Order[]
+  restockRequests RestockRequest[]
+  pointsConfigs PointsConfig[]
+  pointsLogs    PointsLog[]
+  customers     Customer[]
+  merchants     MerchantStaff[]
+  suppliers     Supplier[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([code])
+  @@index([status])
+}
+
+// 商家员工(多员工支持,预留)
+model MerchantStaff {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name        String
+  phone       String?
+  role        String   @default("staff")      // owner | manager | staff
+  code        String?  // ⭐ 2026-10-02 奕霖立：理发师 3 位数编号（自定义）
+  avatar      String?
+  bio         String?
+  specialties String?  // ⭐ JSON 字符串：["cut","dye","perm","care","style"]
+  yearsOfExp  Int      @default(0)
+  startPrice  Int      @default(0)
+  rating      Float    @default(5.0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([merchantId, code])
+  @@index([merchantId])
+}
+
+// ============================================================
+// 2. Product(商品)- 25 列核心数据
+// ============================================================
+model Product {
+  id              String   @id @default(cuid())
+  merchantId      String
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  // ===== 基础信息 =====
+  productCode     String                       // 商品编码(唯一)
+  name            String                       // 品名
+  shortName       String?                      // 商品简称
+  spec            String?                      // 规格(如 14g*9袋)
+  manufacturer    String?                      // 生产企业
+  barcode         String?                      // 条形码
+  approvalNo      String?                      // 批准文号(国药准字)
+
+  // ===== 价格 =====
+  totalAmount     Float?                       // 售价金额(库存总价)
+  price           Float                        // 售价
+  memberPrice     Float?                       // 会员价
+  points          Int        @default(0)       // 积分
+
+  // ⭐ P0 #7.5 奕霖 2026-07-20 — 进货信息（Product 表加 5 字段）
+  costPrice       Float?      @default(0)       // 进货价
+  supplierName    String?                       // 供应商名称（与 Supplier.name 关联）
+  supplierPhone   String?                       // 供应商电话
+  supplierContact String?                       // 联系人
+  supplierNote    String?                       // 备注
+
+  medicalCode     String?                      // 医保编码
+
+  // ===== 库存 =====
+  // 2026-07-04 01:05 奕霖需求：DB 实际列名是 stock，不是 quantity
+  // 代码全部用 raw SQL ($queryRaw)，但 Prisma client 生成要知道列名
+  stock           Int        @default(0)       // 库存数量（DB 实际列名）
+  unit            String?                      // 单位（盒/瓶/支/袋/包/个/罐/提/套）
+  weightGram      Int?       @default(0)       // 参考重量（克）
+
+  // ===== 销售数据 =====
+  // DB 实际列名是 sales30d / sales30_60d / sales60_90d（下划线风格）
+  sales30d        Int?       @default(0)       // 前推 30 天销售数量
+  sales30_60d     Int?       @default(0)       // 第 30-60 天销售数量
+  sales60_90d     Int?       @default(0)       // 第 60-90 天销售数量
+
+  // ===== 分类（对齐 DB 实际列名） =====
+  category        String?                      // 类别名称（OTC/中药/医疗器械/...）
+  categoryLabel   String?                      // 类别中文标签（LLM 推断）
+  functionTags    String?                      // 功能主治标签（JSON 数组）
+
+  // ===== 状态 =====
+  status          String      @default("active") // active | inactive
+  image           String?                      // 商品图片 URL
+  description     String?                      // 商品描述
+
+  // ===== 剂型 / 分类扩展 =====
+  dosage          String?                      // 剂型（片剂/胶囊/颗粒/口服液/...）
+  productType     String?                      // 产品类型
+  qualityClass    String?                      // 质量分类（OTC/医疗器械/日用品/化妆）
+
+  // ===== 销售状态（2026-07-14 加，补齐索引字段）=====
+  purchaseStatus  String?                      // 采购状态
+  salesStatus     String?                      // 销售状态
+
+  // ===== 剂型 / 分类 ======
+  dosageForm      String?                      // 剂型（片剂/胶囊/颗粒/口服液/...）
+  qualityCategory String?                      // 质量分类（OTC/处方药/医疗器械/...）
+
+  // ===== 冷热度 =====
+  daysNotSold     Int?                         // 未销售天数
+  searchText      String?                      // 全文搜索文本
+
+  // ===== 元数据 =====
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  orderItems      OrderItem[]
+  pointsProducts  PointsProduct[]
+  restockRequests RestockRequest[]
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@unique([merchantId, productCode])
+  @@index([merchantId, purchaseStatus])
+  @@index([merchantId, salesStatus])
+  @@index([merchantId, category])
+  @@index([merchantId, dosageForm])
+  @@index([merchantId, qualityCategory])
+  @@index([merchantId, daysNotSold])
+  @@index([searchText])
+}
+
+// ============================================================
+// 3. Activity(活动展示页)
+// ============================================================
+model Activity {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  title       String                          // 活动标题
+  subtitle    String?                         // 副标题
+  coverImage  String?                         // 封面图
+  description String?                         // 详细描述(Markdown)
+
+  // 活动类型
+  type        String   @default("promotion")  // promotion | discount | new_arrival | points_double
+  // promotion: 满减/折扣
+  // discount: 直接降价
+  // new_arrival: 新品上市
+  // points_double: 积分翻倍
+
+  // 活动配置
+  rules       String?   @default("{}")        // JSON: {"满100减20":true, "第二件半价":true}
+  productIds  String?   @default("[]")        // JSON: 参与活动的商品 ID 列表
+
+  // 时间
+  startAt     DateTime
+  endAt       DateTime
+
+  // 状态
+  status      String    @default("draft")     // draft | published | ended | cancelled
+  views       Int       @default(0)
+  clicks      Int       @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([merchantId, status])
+  @@index([merchantId, startAt, endAt])
+}
+
+// ============================================================
+// 4. Order(订单)- 下单闭环
+// ============================================================
+model Order {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+
+  // 订单号
+  orderNo     String   @unique                // 自动生成
+
+  // 金额
+  totalAmount Float                          // 总金额
+  discountAmount Float @default(0)           // 折扣金额
+  pointsUsed  Int     @default(0)            // 使用积分
+  pointsValue Float   @default(0)            // 积分抵扣金额
+  finalAmount Float                         // 实付金额
+
+  // 配送
+  deliveryType String  @default("pickup")    // pickup | delivery
+  deliveryAddress String?                    // 配送地址
+  deliveryPhone  String?                     // 配送电话
+
+  // 取货码(核心:合规闭环 - 不接支付也能完整下单)
+  pickupCode      String?  @unique           // 6 位数字取货码
+  pickupExpiresAt DateTime?                  // 取货码过期时间
+  pickedUpAt      DateTime?                  // 实际取货时间
+  pickedUpBy      String?                    // 核销员工 ID
+
+  // 状态
+  status     String   @default("pending")    // pending | paid | preparing | ready | delivered | cancelled | refunded
+  paidAt     DateTime?
+  completedAt DateTime?
+
+  // 备注
+  remark     String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  items      OrderItem[]
+  pointsLogs PointsLog[]
+
+  @@index([merchantId, status])
+  @@index([customerId])
+  @@index([orderNo])
+  @@index([pickupCode])
+  @@index([pickupExpiresAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  productName String                           // 冗余商品名(历史价)
+  productSpec String?                          // 冗余规格
+  productUnit String?                          // 冗余单位
+  productImage String?                         // 冗余图片
+
+  price     Float                              // 下单时价格
+  quantity  Int                                // 数量
+  subtotal  Float                              // 小计
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ============================================================
+// 5. Points(积分系统)- 私域核心引擎
+// ============================================================
+// 积分规则配置
+model PointsConfig {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  // 基础规则
+  earnRate    Float    @default(0.05)         // 消费返积分比例(5%)
+  pointValue  Float    @default(0.01)         // 1 积分 = 0.01 元 (兑换时价值)
+  minRedeem   Int      @default(100)          // 最低兑换
+
+  // 积分抵扣规则 (POS 收银用,奕霖 2026-09-07 要求可编辑)
+  pointsToYuanRate Float   @default(0.02)      // 1 积分 = 0.02 元 (抵扣率)
+  maxDeductPercent Int     @default(50)        // 最多抵订单的 50%
+  minPointsToUse   Int     @default(100)       // 最低 100 积分才允许抵扣
+  deductEnabled    Boolean @default(true)      // 抵扣功能开关
+
+  // 兑换商品
+  // 商家配置:哪些商品可以用积分兑换
+  // 用 PointsProduct 关联
+
+  updatedAt   DateTime @updatedAt
+
+  @@unique([merchantId])
+}
+
+// 积分可兑换商品
+model PointsProduct {
+  id           String   @id @default(cuid())
+  merchantId   String
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  pointsRequired Int                            // 兑换所需积分
+  originalPrice  Float                           // 原价(展示给客户)
+  stock          Int     @default(0)            // 兑换库存(清库存引擎)
+
+  status        String   @default("active")    // active | inactive
+  createdAt     DateTime @default(now())
+
+  @@unique([merchantId, productId])
+  @@index([merchantId, status])
+}
+
+// 积分流水
+model PointsLog {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  type        String                            // earn | spend | refund | expire
+  amount      Int                               // 积分变动(正为获得,负为消耗)
+  balance     Int                               // 变动后余额
+  reason      String                            // 原因说明
+  orderId     String?                           // 关联订单
+  order       Order?    @relation(fields: [orderId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([merchantId, customerId])
+  @@index([customerId, createdAt])
+}
+
+// ============================================================
+// 6. RestockRequest(上报进货)- 解决 73% 缺货率
+// ============================================================
+model RestockRequest {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // 客户问"有没有"时 = AI 自动上报
+  customerQuery String                          // 客户问的关键词
+  requestCount  Int    @default(1)              // 被问次数(多次问 = 优先进货)
+
+  // 商家处理
+  status      String   @default("pending")     // pending | in_progress | restocked | cancelled
+  remark      String?                           // 商家备注
+  processedAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([merchantId, status])
+  @@index([productId])
+  @@index([status, requestCount])
+}
+
+// ============================================================
+// 7. Customer(用户)- 客户档案
+// ============================================================
+model Customer {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  phone       String?                          // 联系电话
+  nickname    String?
+  avatar      String?
+
+  // 客户属性
+  totalSpent  Float     @default(0)            // 累计消费
+  totalOrders Int       @default(0)            // 累计订单
+  points      Int       @default(0)            // 当前积分
+
+  // 客户标签
+  tags        String?   @default("[]")         // JSON: ["高频", "慢病", "老人"]
+
+  // ⭐ 2026-07-13 13:58 注销账户：active | deactivated（脱敏状态）
+  status        String   @default("active")
+  deactivatedAt DateTime?
+  deactivationReason String?  // user_requested | admin_action
+
+  // 元数据
+  createdAt   DateTime @default(now())
+  lastOrderAt DateTime?
+  updatedAt   DateTime @updatedAt
+
+  orders      Order[]
+  pointsLogs  PointsLog[]
+
+  @@unique([merchantId, phone])
+  @@index([merchantId])
+}
+
+// ============================================================
+// 8. 已有:用户系统(清禾之前做的)
+// ============================================================
+model User {
+  id              String   @id @default(cuid())
+  phone           String   @unique
+  nickname        String   @default("")
+  avatar          String   @default("🌿")
+  role            String   @default("普通")
+  points          Int      @default(0)          // 通用积分 (兼容老字段)
+  points          Int      @default(0)
+  createdAt       DateTime @default(now())
+  lastLoginAt     DateTime @default(now())
+  age             Int?
+  gender          String?
+  birthday        String?
+  allergy         String?
+  chronicDiseases String?
+  preferences     String?
+  lastSymptoms    String?
+
+  comments   Comment[]
+  feedbacks  Feedback[]
+
+  @@index([phone])
+}
+
+model PhoneVerification {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone, used])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating    Int      @default(5)
+  content   String
+  likes     Int      @default(0)
+  createdAt DateTime @default(now())
+  orderId   String?
+  category  String?
+  title     String?
+  tags      String?
+
+  replies   Reply[]
+
+  @@index([userId])
+  @@index([category])
+}
+
+model Reply {
+  id        String   @id @default(cuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String
+  userName  String
+  userAvatar String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([commentId])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  content   String
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model SmsLog {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  status    String
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+// 奕霖 2026-07-09 需求：/admin 时间线需要数据源
+// 0-1 阶段：手动记录几个埋点位（merchant 警告/反馈到达/订单完成/库存阈值等）
+// ============================================================
+// 9. Supplier(供应商)- 进货信息独立表
+// ⭐ 2026-07-20 奕霖 — P0 #8 A2-a 第一步
+// ============================================================
+model Supplier {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  name        String                          // 供应商名称（必填）
+  contact     String?                         // 联系人
+  phone       String?                         // 联系电话
+  address     String?                         // 地址
+  note        String?                         // 备注
+  status      String   @default("active")     // active | inactive
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([merchantId])
+  @@index([name])
+}
+
+// ============================================================
+// 10. PurchaseOrder(采购单)- 进货闭环
+// ⭐ 2026-07-20 奕霖 — P0 #8 A2-a 第一步
+// ============================================================
+model PurchaseOrder {
+  id          String   @id @default(cuid())
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  supplierId  String
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+
+  orderNo     String   @unique                // 采购单号（自动生成）
+  status      String   @default("draft")      // draft | sent | confirmed | received | cancelled
+
+  totalAmount Float    @default(0)            // 售价总金额（参考）
+  totalCost   Float    @default(0)            // 进货总成本
+
+  expectedDate DateTime?                      // 预计到货日期
+  receivedDate DateTime?                      // 实际到货日期
+  note        String?                         // 备注
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       PurchaseOrderItem[]
+
+  @@index([merchantId])
+  @@index([supplierId])
+  @@index([status])
+}
+
+model PurchaseOrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+
+  quantity    Int                              // 进货数量
+  costPrice   Float                            // 进货单价
+  subtotal    Float                            // 小计 = quantity * costPrice
+  receivedQty Int      @default(0)             // 已到货数量
+
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  merchantId  String?  // null = 全局/平台层
+  actorType   String   // admin | staff | customer | system
+  actorId     String?  // 员工编号/用户 ID/空
+  action      String   // 动作类型: warn_merchant | handle_feedback | order_completed | stock_low | content_reported | login | config_changed
+  target      String?  // 目标对象 ID（商户 ID / 订单 ID / 反馈 ID 等）
+  description String   // 人读描述: "警告商户「芝林大药房」" / "收到反馈（向上·信任问题）"
+  meta        String?  // JSON 字符串存放额外数据
+  createdAt   DateTime @default(now())
+
+  @@index([merchantId, createdAt])
+  @@index([action])
+  @@index([createdAt])
+}
+
+
+
+// ⭐ 2026-10-01 清禾方案 A — 每个商户独立的造型服务表（与 Product 表分离）
+// 目的：跨 SaaS 数据隔离，每个 merchant 只能看自己的服务
+model Service {
+  id          String   @id @default(cuid())
+  merchantId  String                                    // 商户 ID（必填）
+  merchant    Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  serviceCode String                                    // 服务编码(商户内唯一)
+  name        String                                    // 服务名称(如"日韩短发造型")
+  shortName   String?                                   // 简称
+  category    String                                    // 分类 code: cut|dye|perm|care|style|works
+  icon        String?                                   // Emoji 图标(✂️🎨🌊)
+  image       String?                                   // 服务配图 URL
+  description String?                                   // 描述
+  price       Float     @default(0)                     // 售价
+  duration    Int       @default(60)                    // 时长(分钟)
+  status      String    @default("active")              // active|inactive
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([merchantId, serviceCode])                   // 商户内编码唯一
+  @@index([merchantId, status])                         // 按商户+状态查询
+  @@index([merchantId, category])                       // 按商户+分类查询
+}
+
+// ⭐ 2026-10-02 12:00 奕霖拍板：理发师队列（DB 根治方案）
+model BarberQueue {
+  id          String   @id @default(cuid())
+  merchantId  String                                    // 商户 ID（m_barber_001）
+  orderNo     String   @unique                          // 顺序号（A001+/B001+）
+  type        String   @default("booking")              // booking | ticket
+  customerName String
+  customerPhone String
+  service     String                                    // 剪发|染发|烫发|护理|造型
+  stylistName String                                    // 理发师 name
+  stylistCode String?                                   // 理发师 3 位数编号
+  status      String   @default("reserved")             // reserved | arrived | serving | completed | no_show
+  scheduledAt String                                    // 时段 (booking) 或 HH:mm (ticket)
+  scheduledDate String  @default("today")              // today | tomorrow
+  arrivedAt   String?
+  startedAt   String?
+  completedAt String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([merchantId, status])
+  @@index([merchantId, scheduledDate])
+  @@index([merchantId, createdAt])
+}

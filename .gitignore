@@ -1,0 +1,82 @@
+node_modules/
+.next/
+out/
+*.log
+.env*.local
+.DS_Store
+public/uploads/snapshots/*.jpg
+public/uploads/snapshots/*.png
+public/uploads/pickup-snapshots/*.jpg
+public/uploads/pickup-snapshots/*.png
+public/uploads/avatars/*
+!public/uploads/.gitkeep
+*.tsbuildinfo
+.turbo/
+
+# 文档/脚本/测试不进版本(太大且跟源码分离)
+wiki/
+scripts/
+tests/
+test_*.py
+verify*.py
+final-*.py
+shoot*.py
+cleanup*.py
+check_*.py
+gen-*.py
+*checkpoint*.json
+
+# 根目录测试脚本(非源码)
+/test_*.py
+/verify*.py
+/final_*.py
+/shoot*.py
+/cleanup*.py
+/check_*.py
+/gen-*.py
+/dev.db
+/next.config.ts.bak*
+
+# 备份目录(临时)
+.bak-*/
+/.bak-*/
+.next-config-bak-*
+/__tests__/
+/.openclaw/
+
+# IDE 配置
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+# 测试改动标记
+*.bak
+
+public/uploads/products/*.png
+public/uploads/products/*.jpeg
+public/uploads/products/*.jpg
+
+# 清禾本地临时/备份
+.archive/
+.bak/
+.bak*/
+.archive*/
+.openclaw/tmp/
+.openclaw/state/
+
+# 🔒 凭证 / SSH 私钥（v1.1.24 奕霖立：禁止 push 任何凭证）
+.env-keys/
+.env-keys/**
+.ssh-keys/
+.ssh-keys/**
+.env
+.env.local
+.env.production
+.env.development
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+secrets/

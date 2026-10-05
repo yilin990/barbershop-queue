@@ -1,0 +1,449 @@
+[
+  {
+    "id": "m1",
+    "name": "清爽渐变推剪",
+    "tagline": "男生短发入门款",
+    "length": "short",
+    "gender": "male",
+    "color": "natural_black",
+    "face_shape": [
+      "round",
+      "oval",
+      "square"
+    ],
+    "vibe": [
+      "清爽",
+      "运动",
+      "学生"
+    ],
+    "description": "两侧渐变推剪 + 顶部留 3-5cm 自然纹理，不需要打理，洗完头自然干就好",
+    "duration_min": 45,
+    "price_range": "¥80-150",
+    "popularity": 5,
+    "tags": [
+      "新手友好",
+      "免打理",
+      "学生"
+    ],
+    "image": "/styles/hairstyle-m1-fade.png",
+    "image_prompt": "Close-up portrait of a young Chinese man with a fresh fade haircut, sides shaved to skin, top with natural 4cm messy textured hair. Wearing simple white t-shirt. Warm natural studio lighting. Clean cream background. Professional photography style, high detail hair texture.",
+    "_status": "done"
+  },
+  {
+    "id": "m2",
+    "name": "韩式逗号刘海",
+    "tagline": "男生帅气进阶款",
+    "length": "medium",
+    "gender": "male",
+    "color": "natural_brown",
+    "face_shape": [
+      "long",
+      "oval",
+      "heart"
+    ],
+    "vibe": [
+      "韩系",
+      "文艺",
+      "约会"
+    ],
+    "description": "韩式逗号刘海，两侧铲青，顶部留 8-10cm 微卷造型，建议用发蜡抓蓬松",
+    "duration_min": 60,
+    "price_range": "¥150-280",
+    "popularity": 5,
+    "tags": [
+      "韩系",
+      "约会",
+      "微卷"
+    ],
+    "image": "/styles/hairstyle-m2-korean.png",
+    "image_prompt": "Portrait of a young Chinese man with Korean-style comma fringe hairstyle, sides faded to skin, top 10cm with soft Korean wave and slight curl inward at forehead. Wearing casual beige sweater. Warm soft studio lighting. Cream beige background. Professional photography, sharp focus on hair.",
+    "_status": "done"
+  },
+  {
+    "id": "m3",
+    "name": "商务油头",
+    "tagline": "成熟稳重型",
+    "length": "short",
+    "gender": "male",
+    "color": "natural_black",
+    "face_shape": [
+      "oval",
+      "square",
+      "long"
+    ],
+    "vibe": [
+      "商务",
+      "成熟",
+      "婚礼"
+    ],
+    "description": "经典男士油头（side part），需要定型产品 + 吹风造型，适合正式场合",
+    "duration_min": 60,
+    "price_range": "¥200-350",
+    "popularity": 4,
+    "tags": [
+      "商务",
+      "正式",
+      "成熟"
+    ],
+    "image": "/styles/hairstyle-m3-slick.png",
+    "image_prompt": "Portrait of a confident mature Chinese businessman with classic side-parted slick back hairstyle, combed neatly with pomade shine, short and structured. Wearing dark navy suit and tie. Professional studio lighting, dark cream gradient background. Sharp focus on polished hair texture.",
+    "_status": "done"
+  },
+  {
+    "id": "m4",
+    "name": "锡纸烫碎盖",
+    "tagline": "潮流个性款",
+    "length": "medium",
+    "gender": "male",
+    "color": "dyed_brown",
+    "face_shape": [
+      "round",
+      "oval"
+    ],
+    "vibe": [
+      "潮流",
+      "街头",
+      "个性"
+    ],
+    "description": "锡纸烫碎盖，蓬松纹理 + 染色，适合脸圆偏大的男生拉伸脸型",
+    "duration_min": 120,
+    "price_range": "¥380-580",
+    "popularity": 4,
+    "tags": [
+      "潮流",
+      "染色",
+      "蓬松"
+    ],
+    "image": "/styles/hairstyle-m4-perm.png",
+    "image_prompt": "Portrait of a young Chinese man with trendy textured perm hairstyle, messy crushed foil perm effect, top with voluminous messy curls 12cm, dyed chocolate brown, sides faded. Wearing black hoodie. Street style moody lighting, dark urban background. Photography focus on hair texture detail.",
+    "_status": "done"
+  },
+  {
+    "id": "f1",
+    "name": "韩系锁骨发",
+    "tagline": "女生温柔入门款",
+    "length": "medium",
+    "gender": "female",
+    "color": "natural_brown",
+    "face_shape": [
+      "round",
+      "oval",
+      "heart"
+    ],
+    "vibe": [
+      "温柔",
+      "日常",
+      "学生"
+    ],
+    "description": "锁骨长度韩式发，自然棕色或黑茶色，发尾微内扣修饰脸型",
+    "duration_min": 90,
+    "price_range": "¥180-380",
+    "popularity": 5,
+    "tags": [
+      "韩系",
+      "温柔",
+      "锁骨"
+    ],
+    "image": "/styles/hairstyle-f1-korean-shoulder.png",
+    "image_prompt": "Portrait of a young Chinese woman with Korean shoulder-length hairstyle, soft chocolate brown color with slight inward curl at the ends, natural bangs swept to side. Wearing cream knit sweater. Soft natural studio lighting, cream background. Photography focus on hair flow and texture, warm tone.",
+    "_status": "done"
+  },
+  {
+    "id": "f2",
+    "name": "层次中长发",
+    "tagline": "女生气质款",
+    "length": "medium",
+    "gender": "female",
+    "color": "natural_black",
+    "face_shape": [
+      "round",
+      "long"
+    ],
+    "vibe": [
+      "气质",
+      "通勤",
+      "成熟"
+    ],
+    "description": "中长发层次剪，发尾大 C 弧度，修饰脸型显气质",
+    "duration_min": 90,
+    "price_range": "¥220-420",
+    "popularity": 4,
+    "tags": [
+      "气质",
+      "层次",
+      "通勤"
+    ],
+    "image": "/styles/hairstyle-f2-layered.png",
+    "image_prompt": "Portrait of an elegant young Chinese woman with layered medium long hairstyle, big C-curve at the ends, natural black color, soft face-framing layers. Wearing beige blazer over white shirt. Professional studio lighting, neutral cream background. Photography sharp focus on hair layers and flow.",
+    "_status": "done"
+  },
+  {
+    "id": "f3",
+    "name": "挂耳染挑染",
+    "tagline": "女生个性款",
+    "length": "short",
+    "gender": "female",
+    "color": "highlight_pink",
+    "face_shape": [
+      "oval",
+      "heart",
+      "long"
+    ],
+    "vibe": [
+      "潮流",
+      "个性",
+      "街拍"
+    ],
+    "description": "耳后挂耳染粉色/紫色挑染 + 内层染色，适合想尝试新风格又不想太夸张的女生",
+    "duration_min": 180,
+    "price_range": "¥580-980",
+    "popularity": 4,
+    "tags": [
+      "潮流",
+      "挑染",
+      "个性"
+    ],
+    "image": "/styles/hairstyle-f3-peekaboo.png",
+    "image_prompt": "Portrait of a young Chinese woman with trendy ear-cover peekaboo highlights hairstyle, bob cut to chin length, natural black base and rose pink hidden color revealed at ear tuck, soft bangs. Wearing white tee and leather jacket. Moody studio lighting, dark cream background. Photography focus on the peekaboo color contrast.",
+    "_status": "done"
+  },
+  {
+    "id": "f4",
+    "name": "气质长直发",
+    "tagline": "女生经典款",
+    "length": "long",
+    "gender": "female",
+    "color": "natural_black",
+    "face_shape": [
+      "oval",
+      "heart"
+    ],
+    "vibe": [
+      "气质",
+      "婚礼",
+      "通勤"
+    ],
+    "description": "过肩长直发，自然黑色或深棕色，最经典的气质款",
+    "duration_min": 60,
+    "price_range": "¥150-280",
+    "popularity": 5,
+    "tags": [
+      "气质",
+      "长直发",
+      "经典"
+    ],
+    "image": "/styles/hairstyle-f4-longstraight.png",
+    "image_prompt": "Portrait of a young Chinese woman with classic long straight hair, waist-length natural black color with subtle shine, center part, sleek and silky. Wearing soft pink silk blouse. Studio lighting with rim light to highlight hair shine, cream gradient background. Photography focus on hair length and shine.",
+    "_status": "done"
+  },
+  {
+    "id": "m5",
+    "name": "复古油头",
+    "tagline": "商务精英标配",
+    "length": "short",
+    "gender": "male",
+    "color": "natural_black",
+    "face_shape": [
+      "oval",
+      "square",
+      "long"
+    ],
+    "vibe": [
+      "商务",
+      "正式",
+      "精英"
+    ],
+    "description": "经典男士油头（side part），需要定型产品 + 吹风造型，适合正式场合",
+    "duration_min": 60,
+    "price_range": "¥200-350",
+    "popularity": 4,
+    "tags": [
+      "商务",
+      "正式",
+      "定型"
+    ],
+    "image": "/styles/hairstyle-m5.png",
+    "image_prompt": "Close-up portrait of a young Chinese man with a classic side-part pompadour haircut, sleek and shiny, using pomade. Wearing formal white shirt. Warm studio lighting. Clean cream background. Professional photography style.",
+    "_status": "done"
+  },
+  {
+    "id": "m6",
+    "name": "短寸圆头",
+    "tagline": "清爽极简入门款",
+    "length": "short",
+    "gender": "male",
+    "color": "natural_black",
+    "face_shape": [
+      "round",
+      "oval",
+      "square"
+    ],
+    "vibe": [
+      "极简",
+      "清爽",
+      "军人"
+    ],
+    "description": "两侧铲 + 顶部极短圆寸，干净利落，适合懒人和军人风格",
+    "duration_min": 30,
+    "price_range": "¥50-100",
+    "popularity": 5,
+    "tags": [
+      "懒人",
+      "极简",
+      "免打理"
+    ],
+    "image": "/styles/hairstyle-m6.png",
+    "image_prompt": "Close-up portrait of a young Chinese man with a buzzcut, hair length 3mm all over. Wearing simple white t-shirt. Warm natural studio lighting. Clean cream background. Professional photography style, high detail head shape.",
+    "_status": "done"
+  },
+  {
+    "id": "m7",
+    "name": "飞机头朋克",
+    "tagline": "个性张扬进阶款",
+    "length": "medium",
+    "gender": "male",
+    "color": "bleached",
+    "face_shape": [
+      "oval",
+      "long",
+      "heart"
+    ],
+    "vibe": [
+      "朋克",
+      "个性",
+      "张扬"
+    ],
+    "description": "前部高耸蓬松 + 两侧铲 + 顶部漂染，适合追求个性的男生",
+    "duration_min": 90,
+    "price_range": "¥300-500",
+    "popularity": 3,
+    "tags": [
+      "个性",
+      "朋克",
+      "张扬"
+    ],
+    "image": "/styles/hairstyle-m7.png",
+    "image_prompt": "Close-up portrait of a young Chinese man with a punk-style mohawk, sides shaved, top bleached and standing up. Wearing black t-shirt. Dramatic studio lighting. Clean dark background. Professional photography style.",
+    "_status": "done"
+  },
+  {
+    "id": "f5",
+    "name": "波波头波波",
+    "tagline": "甜美短发入门款",
+    "length": "short",
+    "gender": "female",
+    "color": "natural_black",
+    "face_shape": [
+      "round",
+      "oval",
+      "square"
+    ],
+    "vibe": [
+      "甜美",
+      "清新",
+      "学生"
+    ],
+    "description": "齐下巴波波头，自然内扣或外翘，适合学生和初入职场",
+    "duration_min": 45,
+    "price_range": "¥80-150",
+    "popularity": 4,
+    "tags": [
+      "甜美",
+      "清新",
+      "学生"
+    ],
+    "image": "/styles/hairstyle-f5-bob.png",
+    "image_prompt": "Close-up portrait of a young Chinese woman with a chin-length bob haircut, natural inward curl. Wearing soft pink sweater. Warm natural studio lighting. Clean cream background. Professional photography style.",
+    "_status": "done"
+  },
+  {
+    "id": "f6",
+    "name": "锁骨中长发",
+    "tagline": "气质优雅进阶款",
+    "length": "medium",
+    "gender": "female",
+    "color": "natural_brown",
+    "face_shape": [
+      "oval",
+      "long",
+      "heart"
+    ],
+    "vibe": [
+      "气质",
+      "优雅",
+      "知性"
+    ],
+    "description": "锁骨长度中长发，自然垂顺或微卷，适合职场和约会",
+    "duration_min": 60,
+    "price_range": "¥150-280",
+    "popularity": 5,
+    "tags": [
+      "气质",
+      "优雅",
+      "职场"
+    ],
+    "image": "/styles/hairstyle-f6-collarbone.png",
+    "image_prompt": "Close-up portrait of a young Chinese woman with collarbone-length hair, natural brown color, soft layers. Wearing elegant white blouse. Warm natural studio lighting. Clean cream background. Professional photography style.",
+    "_status": "done"
+  },
+  {
+    "id": "f7",
+    "name": "法式慵懒卷",
+    "tagline": "浪漫随性进阶款",
+    "length": "medium",
+    "gender": "female",
+    "color": "natural_brown",
+    "face_shape": [
+      "round",
+      "oval",
+      "square"
+    ],
+    "vibe": [
+      "浪漫",
+      "随性",
+      "法式"
+    ],
+    "description": "中长卷发，法式慵懒卷发，蓬松自然，适合浪漫约会",
+    "duration_min": 120,
+    "price_range": "¥300-500",
+    "popularity": 4,
+    "tags": [
+      "浪漫",
+      "随性",
+      "法式"
+    ],
+    "image": "/styles/hairstyle-f7-frenchwave.png",
+    "image_prompt": "Close-up portrait of a young Chinese woman with French wave shoulder-length curly hair, natural brown with highlights. Wearing soft beige knit sweater. Warm natural studio lighting. Clean cream background. Professional photography style.",
+    "_status": "done"
+  },
+  {
+    "id": "f8",
+    "name": "直发齐肩",
+    "tagline": "清新纯美入门款",
+    "length": "medium",
+    "gender": "female",
+    "color": "natural_black",
+    "face_shape": [
+      "oval",
+      "round",
+      "long"
+    ],
+    "vibe": [
+      "清新",
+      "纯美",
+      "校园"
+    ],
+    "description": "齐肩直发，自然黑，柔顺亮泽，适合校园和清新风格",
+    "duration_min": 60,
+    "price_range": "¥120-220",
+    "popularity": 4,
+    "tags": [
+      "清新",
+      "纯美",
+      "校园"
+    ],
+    "image": "/styles/hairstyle-f8-straight.png",
+    "image_prompt": "Close-up portrait of a young Chinese woman with straight shoulder-length black hair, shiny and smooth. Wearing light blue denim shirt. Warm natural studio lighting. Clean cream background. Professional photography style.",
+    "_status": "done"
+  }
+]
