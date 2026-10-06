@@ -80,3 +80,8 @@ public/uploads/products/*.jpg
 id_rsa*
 id_ed25519*
 secrets/
+
+# 2026-10-06 清禾: 编辑期备份文件 + prisma WAL
+*.bak-*
+prisma/*.db-shm
+prisma/*.db-wal
