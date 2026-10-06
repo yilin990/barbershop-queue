@@ -1687,7 +1687,16 @@ export default function BookingSection() {
                   </>
                 ) : nextTomorrowReservation ? (
                   <>
-                    <div style={{ fontSize: 22, color: t.primary, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1.1 }}>
+                    {/* ⭐ 2026-10-06 11:55 奕霖立：实时北京时间（即使无当前服务也持续显示） */}
+                    <div style={{
+                      fontSize: 18, color: t.primary, fontWeight: 700,
+                      fontFamily: 'monospace', lineHeight: 1.1,
+                      fontVariantNumeric: 'tabular-nums',  // 避免数字跳动
+                      marginBottom: 6,
+                    }}>
+                      🕐 现在 {currentBeijingTime}
+                    </div>
+                    <div style={{ fontSize: 22, color: t.text, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1.1 }}>
                       明天 {nextTomorrowReservation.scheduledAt}
                     </div>
                     <div style={{ fontSize: 12, color: t.textSecondary, marginTop: 4 }}>
@@ -1699,6 +1708,15 @@ export default function BookingSection() {
                   </>
                 ) : (
                   <>
+                    {/* ⭐ 2026-10-06 11:55 奕霖立：实时北京时间（即使无任何预约也持续显示） */}
+                    <div style={{
+                      fontSize: 20, color: t.primary, fontWeight: 700,
+                      fontFamily: 'monospace', lineHeight: 1.1,
+                      fontVariantNumeric: 'tabular-nums',
+                      marginBottom: 8,
+                    }}>
+                      🕐 现在 {currentBeijingTime}
+                    </div>
                     <div style={{ fontSize: 32, opacity: 0.7 }}>— —</div>
                     <div style={{ fontSize: 13, opacity: 0.85 }}>店长可在控制台开始理发</div>
                   </>
