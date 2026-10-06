@@ -1056,6 +1056,8 @@ export default function BookingSection() {
   }, [successPopup !== null])
   // ⭐ v1.1.23 取消确认弹窗状态（替抂 browser confirm()）
   const [cancelPopup, setCancelPopup] = useState<null | { order: any; label: string }>(null)
+  // ⭐ 2026-10-06 12:50 清禾改：v1.1.30 - 「明日全部预约」弹窗状态
+  const [showTomorrowListModal, setShowTomorrowListModal] = useState(false)
 
   // 时间同步
   useEffect(() => {
@@ -1687,7 +1689,7 @@ export default function BookingSection() {
                   </>
                 ) : nextTomorrowReservation ? (
                   <>
-                    {/* ⭐ 2026-10-06 12:45 清禾改：v1.1.29 - 「明天 XX:XX」改为预约列表（凸显「有人预约」的含义） */}
+                    {/* ⭐ 2026-10-06 12:50 清禾改：v1.1.30 - 「下一位预约」点击展开弹窗查看全部 */}
                     <div style={{
                       fontSize: 11, color: t.textMuted,
                       letterSpacing: '0.12em', textTransform: 'uppercase',
@@ -1699,42 +1701,97 @@ export default function BookingSection() {
                       fontSize: 28, color: t.primary, fontWeight: 700,
                       fontFamily: 'monospace', lineHeight: 1,
                       fontVariantNumeric: 'tabular-nums',
-                      marginBottom: 12,
+                      marginBottom: 14,
                     }}>
                       {currentBeijingTime}
                     </div>
-                    <div style={{
-                      fontSize: 11, color: t.textMuted,
-                      letterSpacing: '0.08em',
-                      marginBottom: 8,
-                    }}>
-                      明日预约 · {reservedTomorrowOrders.length} 单
-                    </div>
-                    <div style={{
-                      display: 'flex', flexDirection: 'column', gap: 6,
-                    }}>
-                      {reservedTomorrowOrders.slice(0, 4).map(o => (
-                        <div key={o.id} style={{
-                          display: 'flex', alignItems: 'baseline', gap: 10,
-                          fontSize: 14, color: t.text,
+                    {/* 可点击卡：下一位预约 + 总数 + 查看全部 hint */}
+                    <div
+                      onClick={() => setShowTomorrowListModal(true)}
+                      style={{
+                        cursor: 'pointer',
+                        padding: '12px 14px',
+                        background: t.bgDeep,
+                        borderRadius: 10,
+                        border: `1px solid ${t.border}`,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        marginBottom: 8,
+                      }}>
+                        <div style={{
+                          fontSize: 11, color: t.textMuted,
+                          letterSpacing: '0.08em',
                         }}>
-                          <span style={{
-                            fontFamily: 'monospace', fontWeight: 600,
-                            color: t.primary, fontVariantNumeric: 'tabular-nums',
-                            minWidth: 48,
-                          }}>{o.scheduledAt}</span>
-                          <span style={{ flex: 1, fontWeight: 500 }}>{o.customerName}</span>
-                          {o.stylistName && o.stylistName !== 'Will be assigned' && (
-                            <span style={{ color: t.textMuted, fontSize: 11 }}>{o.stylistName}</span>
-                          )}
+                          明日预约 · {reservedTomorrowOrders.length} 单
                         </div>
-                      ))}
-                      {reservedTomorrowOrders.length > 4 && (
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
-                          还有 {reservedTomorrowOrders.length - 4} 单...
+                        <div style={{
+                          fontSize: 11, color: t.primary, fontWeight: 600,
+                        }}>
+                          查看全部 →
                         </div>
-                      )}
+                      </div>
+                      <div style={{
+                        display: 'flex', alignItems: 'baseline', gap: 10,
+                      }}>
+                        <span style={{
+                          fontFamily: 'monospace', fontWeight: 700,
+                          color: t.primary, fontVariantNumeric: 'tabular-nums',
+                          fontSize: 18, minWidth: 56,
+                        }}>{nextTomorrowReservation.scheduledAt}</span>
+                        <span style={{ flex: 1, fontWeight: 500, fontSize: 14 }}>
+                          {nextTomorrowReservation.customerName}
+                        </span>
+                        {nextTomorrowReservation.stylistName && nextTomorrowReservation.stylistName !== 'Will be assigned' && (
+                          <span style={{ color: t.textMuted, fontSize: 11 }}>
+                            {nextTomorrowReservation.stylistName}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    {/* 弹窗：明日全部预约 */}
+                    {showTomorrowListModal && (
+                      <ModalOverlay t={t} onClose={() => setShowTomorrowListModal(false)}>
+                        <ModalHeader title="明日全部预约" onClose={() => setShowTomorrowListModal(false)} t={t} />
+                        <div style={{ padding: 20 }}>
+                          <div style={{
+                            fontSize: 11, color: t.textMuted,
+                            letterSpacing: '0.08em', marginBottom: 16,
+                          }}>
+                            共 {reservedTomorrowOrders.length} 单 · 按时间排序
+                          </div>
+                          <div style={{
+                            display: 'flex', flexDirection: 'column', gap: 0,
+                          }}>
+                            {reservedTomorrowOrders.map((o, i) => (
+                              <div key={o.id} style={{
+                                display: 'flex', alignItems: 'baseline', gap: 10,
+                                padding: '12px 0',
+                                borderBottom: i < reservedTomorrowOrders.length - 1
+                                  ? `1px solid ${t.border}`
+                                  : 'none',
+                              }}>
+                                <span style={{
+                                  fontFamily: 'monospace', fontWeight: 700,
+                                  color: t.primary, fontVariantNumeric: 'tabular-nums',
+                                  fontSize: 16, minWidth: 56,
+                                }}>{o.scheduledAt}</span>
+                                <span style={{ flex: 1, fontWeight: 500, fontSize: 14 }}>
+                                  {o.customerName}
+                                </span>
+                                {o.stylistName && o.stylistName !== 'Will be assigned' && (
+                                  <span style={{ color: t.textMuted, fontSize: 12 }}>
+                                    {o.stylistName}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </ModalOverlay>
+                    )}
                   </>
                 ) : (
                   <>
