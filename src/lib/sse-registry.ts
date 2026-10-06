@@ -65,3 +65,13 @@ export function broadcastCall(phone: string, merchantId: string, payload: unknow
   }
   return n
 }
+
+/** 排查用：列出当前在线连接（不含 send 句柄） */
+export function listClients() {
+  const now = Date.now()
+  return Array.from(store().values()).map((c) => ({
+    phone: c.phone,
+    merchantId: c.merchantId,
+    aliveSec: Math.round((now - c.createdAt) / 1000),
+  }))
+}

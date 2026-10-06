@@ -87,6 +87,13 @@ export async function POST(
 
     const result = await pushToPhone(q.customerPhone, q.merchantId, payload)
 
+    // SSE 送达独立记账，之前只记 Web Push 导致 SSE 命中与否完全不可见
+    if (sseDelivered > 0) {
+      writeLog(q.id, q.customerPhone, 'sse-hit', 'delivered=' + sseDelivered)
+    } else {
+      writeLog(q.id, q.customerPhone, 'sse-miss', 'no live SSE client')
+    }
+
     if (result.sent > 0) {
       writeLog(q.id, q.customerPhone, 'sent')
     } else {
