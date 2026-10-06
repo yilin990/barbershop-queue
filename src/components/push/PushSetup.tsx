@@ -49,6 +49,8 @@ export default function PushSetup({
   onStateChange?: (status: Status) => void
 }) {
   const [status, setStatus] = useState<Status>('idle')
+  // 2026-10-07: iOS 加到主屏后无需刷新，点一下即可重新检测
+  const [probe, setProbe] = useState(0)
   const [msg, setMsg] = useState('')
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null)
 
@@ -75,7 +77,7 @@ export default function PushSetup({
     if (Notification.permission === 'granted') set('on')
 
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => set('error'))
-  }, [set]);
+  }, [set, probe]);
 
   // 兜底：页面可见时保持屏幕常亮（iPhone 没装 PWA 也能响）
   useEffect(() => {
@@ -178,6 +180,18 @@ export default function PushSetup({
         <div>2. 选「添加到主屏幕」</div>
         <div>3. 回到桌面图标打开，再点这里</div>
         <div style={{ marginTop: 4, opacity: 0.8 }}>（未添加时页面保持常亮，叫号也会响）</div>
+        <button
+          data-qh-probe-btn
+          onClick={() => setProbe((n) => n + 1)}
+          style={{
+            marginTop: 8, padding: '8px 14px',
+            background: '#b8860b', color: '#fff',
+            border: 'none', borderRadius: 8,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+          }}
+        >
+          我已添加到主屏，重新检测
+        </button>
       </div>
     )
   }

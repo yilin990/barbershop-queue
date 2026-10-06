@@ -2602,15 +2602,6 @@ export default function BookingSection() {
                 <div>🕒 {successPopup.type === 'booking' ? '预约时间' : '取号时间'}：<b>{successPopup.order.scheduledAt}</b></div>
               </div>
 
-              {/* 2026-10-07 清禾: 到号提醒开关 (Web Push, 安卓/苹果) */}
-              <div style={{ marginBottom: 12 }}>
-                <PushSetup
-                  phone={successPopup.order.customerPhone}
-                  merchantId={'m_barber_001'}
-                  compact
-                />
-              </div>
-
               {/* ⭐ v1.1.23 双按钮 + 5s 自动关闭 */}
               <div style={{ display: 'flex', gap: 10 }}>
                 <button
@@ -2643,11 +2634,27 @@ export default function BookingSection() {
 
       {/* ⭐ v1.1.23 (2026-10-05 13:06 奕霖立)：取消确认弹窗（替 browser confirm()） */}
       {/* v1.1.34 (2026-10-06 20:24): 叫号推送居中弹窗 + 提示音 + 震动 */}
-      <CallListener
-        phone={currentUserPhone || ''}
-        merchantId={'m_barber_001'}
-        onCall={handleSseCall}
-      />
+      {/* 2026-10-07 清禾: 常驻到号提醒栏 */}
+      {/* 之前 PushSetup 只放在 5 秒自动关闭的成功弹窗里，实际根本点不到 */}
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '10px 14px', margin: '0 0 14px',
+          background: 'rgba(184, 134, 11, 0.06)',
+          border: '1px solid rgba(184, 134, 11, 0.25)',
+          borderRadius: 12,
+        }}
+      >
+        <PushSetup
+          phone={currentUserPhone || ''}
+          merchantId={'m_barber_001'}
+        />
+        <CallListener
+          phone={currentUserPhone || ''}
+          merchantId={'m_barber_001'}
+          onCall={handleSseCall}
+        />
+      </div>
 
       {callPopup && (
         <div style={{
