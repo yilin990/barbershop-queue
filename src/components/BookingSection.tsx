@@ -29,6 +29,7 @@ import { PinSetupModal } from './PinSetupModal'
 import { PinUnlockModal } from './PinUnlockModal'
 import { useUserStore } from '@/stores/userStore'
 import PushSetup from '@/components/push/PushSetup'
+import CallListener from '@/components/push/CallListener'
 import { PricingModal, UpgradeBanner } from './PricingModal'
 
 // ==============================================
@@ -1214,6 +1215,30 @@ export default function BookingSection() {
       console.warn('[叫号] 提示音播放失败:', e)
     }
   }
+
+  // 2026-10-07 清禾: SSE 收到叫号 -> 弹窗 + 提示音 + 震动
+  const handleSseCall = useCallback((a: { title: string; body: string; at: number }) => {
+    const parts = String(a.body || '').split('\u00b7').map((s) => s.trim())
+    const t = new Date().toLocaleTimeString('zh-CN', {
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai',
+    })
+    const noPart = parts.find((p) => p.indexOf('\u5355\u53f7') === 0) || ''
+    const stylistPart = parts.find((p) => p.indexOf('\u8001\u5e08') > 0) || ''
+    setCallPopup({
+      name: parts[0] || '\u60a8\u7684\u53f7\u7801',
+      phone: currentUserPhone || '',
+      no: noPart.replace('\u5355\u53f7', '').trim(),
+      service: parts[1] || '',
+      stylist: stylistPart.replace('\u8001\u5e08', '').trim(),
+      time: t,
+    })
+    playCallChime()
+    try { (navigator as any)?.vibrate?.([300, 120, 300, 120, 600]) } catch {}
+    setActivities((prev) => [
+      { time: t, text: '\ud83d\udce2 \u53eb\u53f7\u63a8\u9001 \u00b7 ' + (parts[0] || '') },
+      ...prev,
+    ].slice(0, 5))
+  }, [currentUserPhone])
 
   function callCustomer(id: string) {
     // 2026-10-07 清禾：叫号同时触发服务端推送（真到手机通知）
@@ -2618,6 +2643,12 @@ export default function BookingSection() {
 
       {/* ⭐ v1.1.23 (2026-10-05 13:06 奕霖立)：取消确认弹窗（替 browser confirm()） */}
       {/* v1.1.34 (2026-10-06 20:24): 叫号推送居中弹窗 + 提示音 + 震动 */}
+      <CallListener
+        phone={currentUserPhone || ''}
+        merchantId={'m_barber_001'}
+        onCall={handleSseCall}
+      />
+
       {callPopup && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,

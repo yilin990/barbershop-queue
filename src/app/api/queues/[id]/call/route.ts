@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { pushToPhone, getDb, writeLog } from '@/lib/webpush-server'
+import { broadcastCall } from '@/lib/sse-registry'
 
 export const runtime = 'nodejs'
 
@@ -76,6 +77,14 @@ export async function POST(
       tag: 'barber-call-' + q.id,
     }
 
+    // SSE 优先: 页面开着就能收到 (iPhone Safari 零安装)
+    let sseDelivered = 0
+    try {
+      sseDelivered = broadcastCall(q.customerPhone, q.merchantId, payload)
+    } catch {
+      sseDelivered = 0
+    }
+
     const result = await pushToPhone(q.customerPhone, q.merchantId, payload)
 
     if (result.sent > 0) {
@@ -95,6 +104,7 @@ export async function POST(
         stylistName: q.stylistName,
       },
       push: result,
+      sseDelivered,
     })
   } catch (e) {
     return NextResponse.json(
