@@ -942,8 +942,10 @@ export default function BookingSection() {
     return () => clearInterval(id)
   }, [loadQueues])
   // ⭐ 2026-10-02 00:11 奕霖立：判断当前用户是否已有进行中的单（二选一逻辑）
+  // ⭐ 2026-10-06 11:27 清禾修 Bug 1：cancelled 状态排除（之前只排除 completed，cancelled 被当成 active 展示）
   const myActiveOrder = currentUserPhone
-    ? orders.find(o => o.customerPhone === currentUserPhone && o.status !== 'completed')
+    ? orders.find(o => o.customerPhone === currentUserPhone && 
+      (o.status === 'reserved' || o.status === 'arrived' || o.status === 'serving'))
     : undefined
   const hasActiveBooking = !!myActiveOrder && myActiveOrder.status === 'reserved'
   const hasActiveTicket = !!myActiveOrder && myActiveOrder.status === 'arrived'
@@ -1010,6 +1012,30 @@ export default function BookingSection() {
     if (typeof window === 'undefined') return
     if (ticketSuccess) localStorage.setItem('qinghe-ticket-success', ticketSuccess)
   }, [ticketSuccess])
+  // ⭐ 2026-10-06 11:27 清禾修 Bug 1（补）：清除过期 bookingSuccess/ticketSuccess
+  //   localStorage 持久化的号源在 cancelled/completed 后不清除会一直当 active 显示
+  //   触发时机：orders 列表每次更新（5 秒轮询）
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!bookingSuccess && !ticketSuccess) return
+    if (orders.length === 0) return  // 首次 loadQueues 完成前别误清
+    if (bookingSuccess) {
+      const active = orders.find(o => o.no === bookingSuccess &&
+        (o.status === 'reserved' || o.status === 'arrived' || o.status === 'serving'))
+      if (!active) {
+        setBookingSuccess('')
+        localStorage.removeItem('qinghe-booking-success')
+      }
+    }
+    if (ticketSuccess) {
+      const active = orders.find(o => o.no === ticketSuccess &&
+        (o.status === 'reserved' || o.status === 'arrived' || o.status === 'serving'))
+      if (!active) {
+        setTicketSuccess('')
+        localStorage.removeItem('qinghe-ticket-success')
+      }
+    }
+  }, [orders, bookingSuccess, ticketSuccess])
   // ⭐ 2026-10-01 23:53 奕霖立：成功后弹窗
   const [successPopup, setSuccessPopup] = useState<null | { type: 'booking' | 'ticket'; order: any; countdown?: number }>(null)
   // ⭐ v1.1.23 (2026-10-05 13:06 奕霖立)：成功弹窗 5 秒倒计时自动关闭
@@ -1768,7 +1794,8 @@ export default function BookingSection() {
                 <span style={{ fontSize: 11, color: t.textSecondary }}>人在排队</span>
               </div>
               {/* ⭐ 2026-10-05 00:56 奕霖立：实时分项数据（让客人看总忙度） */}
-              {(servingOrders.length + reservedTodayOrders.length + reservedTomorrowOrders.length) > 0 && (
+              {/* ⭐ 2026-10-06 11:27 清禾修 Bug 2：明日预约不该混入实时分项（语义错） */}
+              {(servingOrders.length + reservedTodayOrders.length) > 0 && (
                 <div style={{
                   display: 'flex', gap: 6, fontSize: 10, color: t.textMuted,
                   marginTop: 4,
@@ -1779,7 +1806,6 @@ export default function BookingSection() {
                 }}>
                   {servingOrders.length > 0 && <span>服务中 <b style={{color: t.success}}>{servingOrders.length}</b></span>}
                   {reservedTodayOrders.length > 0 && <span>今日预约 <b style={{color: t.primary}}>{reservedTodayOrders.length}</b></span>}
-                  {reservedTomorrowOrders.length > 0 && <span>明日预约 <b style={{color: t.textMuted}}>{reservedTomorrowOrders.length}</b></span>}
                 </div>
               )}
               {/* ⭐ 2026-10-05 00:56 奕霖立：预计等待（全局） */}
@@ -1807,18 +1833,11 @@ export default function BookingSection() {
                     <div style={{ color: t.textMuted, fontSize: 13 }}>
                       😊 当前无人排队
                     </div>
-                    {/* ⭐ 2026-10-05 00:56 奕霖立：空态降级 - 显示下一单 + 明日预约数 */}
-                    {reservedTomorrowOrders.length > 0 ? (
-                      <div style={{ marginTop: 10, fontSize: 11, color: t.textSecondary, lineHeight: 1.7 }}>
-                        📅 今日无现场排队
-                        <br />
-                        明日 <b style={{ color: t.primary, fontFamily: 'monospace' }}>{reservedTomorrowOrders[0].scheduledAt}</b> 已预约 <b style={{ color: t.primary }}>{reservedTomorrowOrders.length}</b> 单
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 10, fontSize: 11, color: t.textMuted }}>
-                        📅 近期均无预约 · 可随时到店
-                      </div>
-                    )}
+                    {/* ⭐ 2026-10-05 00:56 奕霖立：空态降级 - 显示下一单 */}
+                    {/* ⭐ 2026-10-06 11:27 清禾修 Bug 2：明日预约不该混入实时空态（语义错，独立成 card） */}
+                    <div style={{ marginTop: 10, fontSize: 11, color: t.textMuted }}>
+                      📅 近期均无现场排队 · 可随时到店
+                    </div>
                   </div>
                 ) : (
                   [...arrivedOrders, ...reservedTodayOrders].map((item, i) => {
