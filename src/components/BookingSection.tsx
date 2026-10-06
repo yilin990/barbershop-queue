@@ -28,6 +28,7 @@ import {
 import { PinSetupModal } from './PinSetupModal'
 import { PinUnlockModal } from './PinUnlockModal'
 import { useUserStore } from '@/stores/userStore'
+import PushSetup from '@/components/push/PushSetup'
 import { PricingModal, UpgradeBanner } from './PricingModal'
 
 // ==============================================
@@ -1215,6 +1216,10 @@ export default function BookingSection() {
   }
 
   function callCustomer(id: string) {
+    // 2026-10-07 清禾：叫号同时触发服务端推送（真到手机通知）
+    // 保留本机弹窗/提示音/震动作为即时反馈
+    fetch('/api/queues/' + id + '/call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .catch(function (e) { console.warn('[call] push request failed:', e) })
     const o = orders.find(x => x.id === id)
     if (!o) return
     const t = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' })
@@ -2570,6 +2575,15 @@ export default function BookingSection() {
                 <div>👤 <b>{successPopup.order.customerName}</b> · 📞 {successPopup.order.customerPhone}</div>
                 <div>💇 {successPopup.order.service} · 理发师 <b>{successPopup.order.stylistName}</b></div>
                 <div>🕒 {successPopup.type === 'booking' ? '预约时间' : '取号时间'}：<b>{successPopup.order.scheduledAt}</b></div>
+              </div>
+
+              {/* 2026-10-07 清禾: 到号提醒开关 (Web Push, 安卓/苹果) */}
+              <div style={{ marginBottom: 12 }}>
+                <PushSetup
+                  phone={successPopup.order.customerPhone}
+                  merchantId={'m_barber_001'}
+                  compact
+                />
               </div>
 
               {/* ⭐ v1.1.23 双按钮 + 5s 自动关闭 */}

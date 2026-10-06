@@ -1,87 +1,51 @@
-self.skipWaiting();
-self.clients.claim();
 /**
- * 造型师助手（铜仁市碧江区店） Service Worker
- * ⭐ 2026-09-22 14:23 段118：清理芝林大药房残留缓存，重置为 barber-v1.0.0
- * 策略：network-first 走 API，cache-first 走静态资源
+ * sw.js — 造型师助手 Service Worker
+ * 职责：接收 Web Push 到号提醒 + 点击通知回到 /merchant
+ * v1.0.0  2026-10-07 清禾
+ *
+ * iOS 前提：必须「添加到主屏幕」才收得到 push（Safari 标签页收不到）
+ * Android / 桌面 Chrome：直接可用
  */
 
-const CACHE_NAME = 'barber-v1.0.1';        // ⭐ 段118：reset cache name（旧药房版缓存已失效）
-const STATIC_CACHE = 'barber-cache-v1.0.0'; // ⭐ 段118：reset static cache
-const RUNTIME_CACHE = 'barber-cache-v1.0.0';// ⭐ 段118：reset runtime cache
+self.addEventListener('install', () => self.skipWaiting())
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 
-// 预缓存关键资源
-const PRECACHE_URLS = [
-  '/',
-  '/merchant',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/apple-touch-icon.png',
-  '/merchant-logo.jpg',
-  '/favicon.png',
-];
-
-// 安装
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      // 清理所有旧版缓存（药房版 + 旧版 barber）
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== STATIC_CACHE && name !== RUNTIME_CACHE)
-          .map((name) => caches.delete(name))
-      );
-    }).then(() => {
-      return caches.open(STATIC_CACHE);
-    }).then((cache) => {
-      return cache.addAll(PRECACHE_URLS).catch((err) => {
-        console.warn('[SW] precache failed:', err);
-      });
-    })
-  );
-});
-
-// 激活
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== STATIC_CACHE && name !== RUNTIME_CACHE)
-          .map((name) => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
-  );
-});
-
-// fetch：network-first 走 API，cache-first 走静态资源
-self.addEventListener('fetch', (event) => {
-  const { request } = event;
-
-  // API 请求：network-first
-  if (request.url.includes('/api/') || request.method !== 'GET') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match(request))
-    );
-    return;
-  }
-
-  // 静态资源：cache-first
-  event.respondWith(cacheFirst(request));
-});
-
-async function cacheFirst(request) {
-  const cached = await caches.match(request);
-  if (cached) return cached;
+self.addEventListener('push', (event) => {
+  let data = {}
   try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(RUNTIME_CACHE);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch (err) {
-    return cached || Response.error();
+    data = event.data ? event.data.json() : {}
+  } catch (e) {
+    data = { title: '到号提醒', body: event.data ? event.data.text() : '' }
   }
-}
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || '到号提醒', {
+      body: data.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: data.tag || 'barber-call',
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [300, 120, 300, 120, 600],
+      data: { url: data.url || '/merchant', payload: data },
+    })
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const d = event.notification.data || {}
+  const url = d.url || '/merchant'
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const c of all) {
+        if ('focus' in c) {
+          c.postMessage({ type: 'BARBER_CALL_PUSH', payload: d.payload })
+          return c.focus()
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url)
+    })()
+  )
+})
