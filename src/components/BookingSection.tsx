@@ -1689,33 +1689,19 @@ export default function BookingSection() {
                   </>
                 ) : nextTomorrowReservation ? (
                   <>
-                    {/* ⭐ 2026-10-06 12:50 清禾改：v1.1.30 - 「下一位预约」点击展开弹窗查看全部 */}
-                    <div style={{
-                      fontSize: 11, color: t.textMuted,
-                      letterSpacing: '0.12em', textTransform: 'uppercase',
-                      marginBottom: 8,
-                    }}>
-                      暂无服务
-                    </div>
+                    {/* ⭐ 2026-10-06 12:55 清禾改：v1.1.31 - 删「暂无服务」label + 删卡框，纯文字排版 */}
                     <div style={{
                       fontSize: 28, color: t.primary, fontWeight: 700,
                       fontFamily: 'monospace', lineHeight: 1,
                       fontVariantNumeric: 'tabular-nums',
-                      marginBottom: 14,
+                      marginBottom: 16,
                     }}>
                       {currentBeijingTime}
                     </div>
-                    {/* 可点击卡：下一位预约 + 总数 + 查看全部 hint */}
+                    {/* 整块可点击区域：明日预约数 + 下一位预约 */}
                     <div
                       onClick={() => setShowTomorrowListModal(true)}
-                      style={{
-                        cursor: 'pointer',
-                        padding: '12px 14px',
-                        background: t.bgDeep,
-                        borderRadius: 10,
-                        border: `1px solid ${t.border}`,
-                        transition: 'all 0.15s ease',
-                      }}
+                      style={{ cursor: 'pointer' }}
                     >
                       <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1795,14 +1781,7 @@ export default function BookingSection() {
                   </>
                 ) : (
                   <>
-                    {/* ⭐ 2026-10-06 12:35 清禾改：方案 A 极简克制版（v1.1.28） */}
-                    <div style={{
-                      fontSize: 11, color: t.textMuted,
-                      letterSpacing: '0.12em', textTransform: 'uppercase',
-                      marginBottom: 12,
-                    }}>
-                      暂无服务
-                    </div>
+                    {/* ⭐ 2026-10-06 12:55 清禾改：v1.1.31 - 删「暂无服务」label（默认分支：仅 实时时间 + 随时可到店） */}
                     <div style={{
                       fontSize: 28, color: t.primary, fontWeight: 700,
                       fontFamily: 'monospace', lineHeight: 1,
