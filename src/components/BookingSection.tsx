@@ -1671,7 +1671,7 @@ export default function BookingSection() {
               </>
             ) : (
               <>
-                <div style={{ fontSize: 11, opacity: 0.85, letterSpacing: '0.1em' }}>暂无服务</div>
+                {/* ⭐ 2026-10-06 12:45 清禾改：v1.1.29 - 删重复「暂无服务」label（之前 outer + inner 两层，现在只剩 inner） */}
                 {/* ⭐ 2026-10-05 00:56 奕霖立：动态显示下一位预约（今天 → 明天 → 默认） */}
                 {nextTodayReservation ? (
                   <>
@@ -1687,11 +1687,11 @@ export default function BookingSection() {
                   </>
                 ) : nextTomorrowReservation ? (
                   <>
-                    {/* ⭐ 2026-10-06 12:35 清禾改：方案 A 极简克制版（v1.1.28） */}
+                    {/* ⭐ 2026-10-06 12:45 清禾改：v1.1.29 - 「明天 XX:XX」改为预约列表（凸显「有人预约」的含义） */}
                     <div style={{
                       fontSize: 11, color: t.textMuted,
                       letterSpacing: '0.12em', textTransform: 'uppercase',
-                      marginBottom: 12,
+                      marginBottom: 8,
                     }}>
                       暂无服务
                     </div>
@@ -1699,22 +1699,41 @@ export default function BookingSection() {
                       fontSize: 28, color: t.primary, fontWeight: 700,
                       fontFamily: 'monospace', lineHeight: 1,
                       fontVariantNumeric: 'tabular-nums',
-                      marginBottom: 6,
+                      marginBottom: 12,
                     }}>
                       {currentBeijingTime}
                     </div>
                     <div style={{
-                      fontSize: 18, color: t.text, fontWeight: 600,
-                      fontFamily: 'monospace', lineHeight: 1.2,
-                      marginBottom: 12,
+                      fontSize: 11, color: t.textMuted,
+                      letterSpacing: '0.08em',
+                      marginBottom: 8,
                     }}>
-                      明天 {nextTomorrowReservation.scheduledAt}
+                      明日预约 · {reservedTomorrowOrders.length} 单
                     </div>
                     <div style={{
-                      fontSize: 11, color: t.textMuted,
-                      letterSpacing: '0.04em',
+                      display: 'flex', flexDirection: 'column', gap: 6,
                     }}>
-                      下一单明天 · 已预约 {reservedTomorrowOrders.length} 单
+                      {reservedTomorrowOrders.slice(0, 4).map(o => (
+                        <div key={o.id} style={{
+                          display: 'flex', alignItems: 'baseline', gap: 10,
+                          fontSize: 14, color: t.text,
+                        }}>
+                          <span style={{
+                            fontFamily: 'monospace', fontWeight: 600,
+                            color: t.primary, fontVariantNumeric: 'tabular-nums',
+                            minWidth: 48,
+                          }}>{o.scheduledAt}</span>
+                          <span style={{ flex: 1, fontWeight: 500 }}>{o.customerName}</span>
+                          {o.stylistName && o.stylistName !== 'Will be assigned' && (
+                            <span style={{ color: t.textMuted, fontSize: 11 }}>{o.stylistName}</span>
+                          )}
+                        </div>
+                      ))}
+                      {reservedTomorrowOrders.length > 4 && (
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
+                          还有 {reservedTomorrowOrders.length - 4} 单...
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (
