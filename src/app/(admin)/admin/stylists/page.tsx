@@ -12,6 +12,7 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Plus, Edit, Trash2, Upload, RefreshCw } from 'lucide-react'
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 
 interface Stylist {
   id: string
@@ -35,7 +36,7 @@ const SPECIALTIES = [
 
 function AdminStylistsInner() {
   const searchParams = useSearchParams()
-  const merchantId = searchParams.get('merchantId') || 'm_barber_001'
+  const merchantId = searchParams.get('merchantId') || DEFAULT_MERCHANT_ID
 
   const [list, setList] = useState<Stylist[]>([])
   const [loading, setLoading] = useState(true)

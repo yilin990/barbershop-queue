@@ -14,6 +14,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AppLayout from '@/components/AppLayout'
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 
 interface Stylist {
   id: string
@@ -38,7 +39,7 @@ const SPECIALTY_META: Record<string, { label: string; icon: string }> = {
 function StylistPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const merchantId = searchParams.get('merchantId') || 'm_barber_001'
+  const merchantId = searchParams.get('merchantId') || DEFAULT_MERCHANT_ID
   const selectId = searchParams.get('selectId') || ''
   
   const [stylists, setStylists] = useState<Stylist[]>([])

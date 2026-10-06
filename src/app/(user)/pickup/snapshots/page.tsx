@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import AppLayout from '@/components/AppLayout'
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 
 interface Service { id: string; name: string; shortName?: string | null; spec: string | null; image: string | null }
 interface PhotoSnapshot { id: string; productId: string; photoUrl: string; shotAt: string; createdAt?: string; period: 'morning' | 'noon' | 'evening'; note?: string | null }
@@ -52,7 +53,7 @@ export default function SnapshotsPage() {
   }
 
   useEffect(() => {
-    fetch('/api/services?merchantId=m_barber_001').then(r => r.json()).then(d => {
+    fetch(`/api/services?merchantId=${DEFAULT_MERCHANT_ID}`).then(r => r.json()).then(d => {
       if (d.success) setServices(d.services || [])
     })
     const h = new Date().getHours()
@@ -61,7 +62,7 @@ export default function SnapshotsPage() {
 
   const reloadToday = async () => {
     try {
-      const r = await fetch('/api/snapshots/list?days=1&merchantId=m_grocery_001')
+      const r = await fetch(`/api/snapshots/list?days=1&merchantId=${DEFAULT_MERCHANT_ID}`)
       const d = await r.json()
       if (d.success) setTodaySnapshots(d.snapshots || [])
     } catch {}
@@ -70,7 +71,7 @@ export default function SnapshotsPage() {
 
   const loadHistory = async (pid: string) => {
     try {
-      const r = await fetch(`/api/snapshots/list?days=3&productId=${encodeURIComponent(pid)}&merchantId=m_barber_001`)
+      const r = await fetch(`/api/snapshots/list?days=3&productId=${encodeURIComponent(pid)}&merchantId=${DEFAULT_MERCHANT_ID}`)
       const d = await r.json()
       if (d.success) {
         setHistorySnapshots(d.snapshots || [])

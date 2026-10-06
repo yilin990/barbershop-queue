@@ -10,12 +10,25 @@
  * - 100% 功能一致：店长模式 / PIN / 活动流 / 叫号推送 / 5 个 modal / 状态机
  */
 
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 import AppLayout from '@/components/AppLayout'
 import BookingSection from '@/components/BookingSection'
+import { DEFAULT_MERCHANT_ID, resolveMerchantIdFromQuery } from '@/lib/merchant'
 
 export default function QueuePage() {
+  return (
+    <Suspense fallback={null}>
+      <QueuePageInner />
+    </Suspense>
+  )
+}
+
+function QueuePageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  // ⭐ 2026-10-07 清禾立：商户 ID 动态化，第二家理发店只需 /merchant/queue?merchantId=m_barber_002
+  const merchantId = resolveMerchantIdFromQuery(searchParams) || DEFAULT_MERCHANT_ID
 
   return (
     <AppLayout>
@@ -52,7 +65,7 @@ export default function QueuePage() {
       {/* ⭐ 2026-09-20 22:26 奕霖拍板：浏览器自己滚动就行，不要额外的页面级滚动
           保留浏览器自带滚动 + 卡片内 180px 限高（段104） */}
       <div style={{ padding: '0 16px 24px' }}>
-        <BookingSection />
+        <BookingSection merchantId={merchantId} />
       </div>
     </AppLayout>
   )

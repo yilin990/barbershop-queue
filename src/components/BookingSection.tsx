@@ -28,6 +28,7 @@ import {
 import { PinSetupModal } from './PinSetupModal'
 import { PinUnlockModal } from './PinUnlockModal'
 import { useUserStore } from '@/stores/userStore'
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 import PushSetup from '@/components/push/PushSetup'
 import CallListener from '@/components/push/CallListener'
 import { PricingModal, UpgradeBanner } from './PricingModal'
@@ -873,7 +874,7 @@ function AgreementModal({ t, onClose }: { t: any; onClose: () => void }) {
 // ==============================================
 // 主组件：BookingSection（完整版，920 行原代码 100% 复制）
 // ==============================================
-export default function BookingSection() {
+export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { merchantId?: string }) {
   // ⭐ 19:17 段 256：route（修 router.push undefined bug）
   // ⭐ 2026-10-01 21:04 奕霖立：动态同步 /stylist 列表
   const [dynamicStylists, setDynamicStylists] = useState<{ id: string; name: string; specialties: string[]; yearsOfExp: number; rating: number; startPrice: number; code?: string }[]>([])
@@ -883,11 +884,11 @@ export default function BookingSection() {
   // ⭐ v1.1.4 改动 5: 默认用登录用户的名字+手机号填进 BookingModal/TicketModal
   const currentUserName = useUserStore(s => s.user?.nickname)
   useEffect(() => {
-    fetch('/api/stylists?merchantId=m_barber_001')
+    fetch(`/api/stylists?merchantId=${merchantId}`)
       .then(r => r.json())
       .then(d => { if (d.success) setDynamicStylists(d.stylists || []) })
       .catch(() => {})
-  }, [])
+  }, [merchantId])
   const router = useRouter()
   // ⭐ 2026-10-01 19:39 奕霖立：店长模式需先登录
   // 中国时间同步
@@ -900,8 +901,8 @@ export default function BookingSection() {
   const loadQueues = useCallback(async () => {
     try {
       const [qRes, aRes] = await Promise.all([
-        fetch('/api/queues?merchantId=m_barber_001', { cache: 'no-store' }),
-        fetch('/api/queues/activities?merchantId=m_barber_001', { cache: 'no-store' }),
+        fetch(`/api/queues?merchantId=${merchantId}`, { cache: 'no-store' }),
+        fetch(`/api/queues/activities?merchantId=${merchantId}`, { cache: 'no-store' }),
       ])
       const d = await qRes.json()
       if (d.success && Array.isArray(d.queues)) {
@@ -937,7 +938,7 @@ export default function BookingSection() {
       // 容错：API 失败时不刷掉本地状态
       console.warn('[队列] loadQueues 失败:', e)
     }
-  }, [])
+  }, [merchantId])
   useEffect(() => {
     loadQueues()
     const id = setInterval(loadQueues, 5000)  // 5 秒轮询
@@ -2313,7 +2314,7 @@ export default function BookingSection() {
             <ActionButton icon="💇" label="选理发师" onClick={() => router.push('/stylist')} t={t} />
             {managerMode && (
               <button
-                onClick={() => router.push('/admin/stylists?merchantId=m_barber_001')}
+                onClick={() => router.push(`/admin/stylists?merchantId=${merchantId}`)}
                 title="编辑选理发师内容"
                 style={{
                   position: 'absolute', top: 6, right: 6,
@@ -2398,7 +2399,7 @@ export default function BookingSection() {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    merchantId: 'm_barber_001',
+                    merchantId,
                     orderNo: order.no,
                     type: 'booking',
                     customerName: order.customerName,
@@ -2445,7 +2446,7 @@ export default function BookingSection() {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    merchantId: 'm_barber_001',
+                    merchantId,
                     orderNo: order.no,
                     type: 'ticket',
                     customerName: order.customerName,
@@ -2647,11 +2648,11 @@ export default function BookingSection() {
       >
         <PushSetup
           phone={currentUserPhone || ''}
-          merchantId={'m_barber_001'}
+          merchantId={merchantId}
         />
         <CallListener
           phone={currentUserPhone || ''}
-          merchantId={'m_barber_001'}
+          merchantId={merchantId}
           onCall={handleSseCall}
         />
       </div>

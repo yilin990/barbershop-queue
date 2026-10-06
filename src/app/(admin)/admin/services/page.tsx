@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/Card'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { ResponsiveTable, type Column } from '@/components/ui/ResponsiveTable'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/lib/design-tokens'
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 import { Edit, Plus, Trash2, X, Search, Package, RefreshCw, Image as ImageIcon, Upload } from 'lucide-react'
 
 const CATEGORIES = [
@@ -45,7 +46,7 @@ interface Service {
 function ServicesPageInner() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const merchantId = searchParams.get('merchantId') || 'm_barber_001'
+  const merchantId = searchParams.get('merchantId') || DEFAULT_MERCHANT_ID
 
   const [list, setList] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
