@@ -1687,38 +1687,57 @@ export default function BookingSection() {
                   </>
                 ) : nextTomorrowReservation ? (
                   <>
-                    {/* ⭐ 2026-10-06 11:55 奕霖立：实时北京时间（即使无当前服务也持续显示） */}
+                    {/* ⭐ 2026-10-06 12:35 清禾改：方案 A 极简克制版（v1.1.28） */}
                     <div style={{
-                      fontSize: 18, color: t.primary, fontWeight: 700,
-                      fontFamily: 'monospace', lineHeight: 1.1,
-                      fontVariantNumeric: 'tabular-nums',  // 避免数字跳动
+                      fontSize: 11, color: t.textMuted,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      marginBottom: 12,
+                    }}>
+                      暂无服务
+                    </div>
+                    <div style={{
+                      fontSize: 28, color: t.primary, fontWeight: 700,
+                      fontFamily: 'monospace', lineHeight: 1,
+                      fontVariantNumeric: 'tabular-nums',
                       marginBottom: 6,
                     }}>
-                      🕐 现在 {currentBeijingTime}
+                      {currentBeijingTime}
                     </div>
-                    <div style={{ fontSize: 22, color: t.text, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1.1 }}>
+                    <div style={{
+                      fontSize: 18, color: t.text, fontWeight: 600,
+                      fontFamily: 'monospace', lineHeight: 1.2,
+                      marginBottom: 12,
+                    }}>
                       明天 {nextTomorrowReservation.scheduledAt}
                     </div>
-                    <div style={{ fontSize: 12, color: t.textSecondary, marginTop: 4 }}>
-                      📅 今日无预约 · 下一单明天
-                    </div>
-                    <div style={{ fontSize: 11, color: t.textMuted, marginTop: 4 }}>
-                      明天已预约 {reservedTomorrowOrders.length} 单
+                    <div style={{
+                      fontSize: 11, color: t.textMuted,
+                      letterSpacing: '0.04em',
+                    }}>
+                      下一单明天 · 已预约 {reservedTomorrowOrders.length} 单
                     </div>
                   </>
                 ) : (
                   <>
-                    {/* ⭐ 2026-10-06 11:55 奕霖立：实时北京时间（即使无任何预约也持续显示） */}
+                    {/* ⭐ 2026-10-06 12:35 清禾改：方案 A 极简克制版（v1.1.28） */}
                     <div style={{
-                      fontSize: 20, color: t.primary, fontWeight: 700,
-                      fontFamily: 'monospace', lineHeight: 1.1,
-                      fontVariantNumeric: 'tabular-nums',
-                      marginBottom: 8,
+                      fontSize: 11, color: t.textMuted,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      marginBottom: 12,
                     }}>
-                      🕐 现在 {currentBeijingTime}
+                      暂无服务
                     </div>
-                    <div style={{ fontSize: 32, opacity: 0.7 }}>— —</div>
-                    <div style={{ fontSize: 13, opacity: 0.85 }}>店长可在控制台开始理发</div>
+                    <div style={{
+                      fontSize: 28, color: t.primary, fontWeight: 700,
+                      fontFamily: 'monospace', lineHeight: 1,
+                      fontVariantNumeric: 'tabular-nums',
+                      marginBottom: 12,
+                    }}>
+                      {currentBeijingTime}
+                    </div>
+                    <div style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>
+                      随时可到店
+                    </div>
                   </>
                 )}
               </>
@@ -1760,83 +1779,74 @@ export default function BookingSection() {
             </div>
 
             {/* 排队列表 */}
-            {/* ⭐ 2026-09-20 22:38 奕霖拍板：标题/按钮/数字都改小，尽量做一行 */}
+            {/* ⭐ 2026-10-06 12:35 清禾改：方案 A 极简克制版（v1.1.28）— 字号收紧到 28/18/14/11，删 emoji，分层留白 */}
             <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              marginBottom: 8,
-              paddingBottom: 6,
-              borderBottom: `1px solid ${t.border}`,
-              gap: 8,
-              flexWrap: 'wrap',  // ⭐ v1.1.22 (2026-10-05 12:45 奕霖立)：nowrap → wrap 修 sub-stats 与「人在排队」重叠 bug
+              display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+              marginBottom: 12,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: t.text, margin: 0, whiteSpace: 'nowrap' }}>
-                  🚶 实时排队
-                </h3>
-                <div style={{
-                  display: 'flex', background: t.bgDeep,
-                  borderRadius: 5, padding: 1, marginLeft: 2,
-                  border: `1px solid ${t.border}`,
-                }}>
-                  <button
-                    onClick={() => setQueueView('flat')}
-                    style={{
-                      padding: '3px 8px',
-                      background: queueView === 'flat' ? t.primary : 'transparent',
-                      color: queueView === 'flat' ? '#fff' : t.textMuted,
-                      border: 'none', borderRadius: 4,
-                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                    }}
-                  >时间</button>
-                  <button
-                    onClick={() => setQueueView('byStylist')}
-                    style={{
-                      padding: '3px 8px',
-                      background: queueView === 'byStylist' ? t.primary : 'transparent',
-                      color: queueView === 'byStylist' ? '#fff' : t.textMuted,
-                      border: 'none', borderRadius: 4,
-                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                    }}
-                  >全部</button>
-                </div>
-              </div>
+              <h3 style={{ fontSize: 18, color: t.text, fontWeight: 600, margin: 0 }}>
+                实时排队
+              </h3>
               <div style={{
-                display: 'flex', alignItems: 'baseline', gap: 3, whiteSpace: 'nowrap',
+                display: 'flex', background: t.bgDeep,
+                borderRadius: 6, padding: 2,
+                border: `1px solid ${t.border}`,
               }}>
-                <span style={{
-                  fontSize: 18, fontWeight: 800, color: t.primary,
-                  fontFamily: 'monospace', lineHeight: 1,
-                }}>
-                  {totalInQueue}
-                </span>
-                <span style={{ fontSize: 11, color: t.textSecondary }}>人在排队</span>
+                <button
+                  onClick={() => setQueueView('flat')}
+                  style={{
+                    padding: '4px 10px',
+                    background: queueView === 'flat' ? t.primary : 'transparent',
+                    color: queueView === 'flat' ? '#fff' : t.textMuted,
+                    border: 'none', borderRadius: 4,
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >时间</button>
+                <button
+                  onClick={() => setQueueView('byStylist')}
+                  style={{
+                    padding: '4px 10px',
+                    background: queueView === 'byStylist' ? t.primary : 'transparent',
+                    color: queueView === 'byStylist' ? '#fff' : t.textMuted,
+                    border: 'none', borderRadius: 4,
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >全部</button>
               </div>
-              {/* ⭐ 2026-10-05 00:56 奕霖立：实时分项数据（让客人看总忙度） */}
-              {/* ⭐ 2026-10-06 11:27 清禾修 Bug 2：明日预约不该混入实时分项（语义错） */}
-              {(servingOrders.length + reservedTodayOrders.length) > 0 && (
-                <div style={{
-                  display: 'flex', gap: 6, fontSize: 10, color: t.textMuted,
-                  marginTop: 4,
-                  whiteSpace: 'nowrap', flexWrap: 'wrap',
-                  justifyContent: 'flex-end',
-                  flexBasis: '100%',  // ⭐ v1.1.22：占满整行，强制换到下一行避重叠
-                  paddingTop: 2,
-                }}>
-                  {servingOrders.length > 0 && <span>服务中 <b style={{color: t.success}}>{servingOrders.length}</b></span>}
-                  {reservedTodayOrders.length > 0 && <span>今日预约 <b style={{color: t.primary}}>{reservedTodayOrders.length}</b></span>}
-                </div>
-              )}
-              {/* ⭐ 2026-10-05 00:56 奕霖立：预计等待（全局） */}
-              {(servingOrders.length + arrivedOrders.length + reservedTodayOrders.length) > 0 && (
-                <div style={{
-                  fontSize: 10, color: t.textMuted, marginTop: 1,
-                  whiteSpace: 'nowrap',
-                  marginLeft: 'auto',  // ⭐ v1.1.22：推到右侧，与 sub-stats 同行（sub-stats 已换行）
-                }}>
-                  ⏱️ 现到店预计 <b style={{color: t.primary}}>{globalEtaMin}</b> 分钟
-                </div>
-              )}
             </div>
+            <div style={{
+              display: 'flex', alignItems: 'baseline', gap: 6,
+              marginBottom: 12,
+            }}>
+              <span style={{
+                fontSize: 28, fontWeight: 700, color: t.primary,
+                fontFamily: 'monospace', lineHeight: 1,
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {totalInQueue}
+              </span>
+              <span style={{ fontSize: 14, color: t.text }}>人在排队</span>
+            </div>
+            {/* ⭐ 2026-10-05 00:56 奕霖立：实时分项数据（让客人看总忙度） */}
+            {/* ⭐ 2026-10-06 11:27 清禾修 Bug 2：明日预约不该混入实时分项（语义错） */}
+            {(servingOrders.length + reservedTodayOrders.length) > 0 && (
+              <div style={{
+                display: 'flex', gap: 16, fontSize: 11, color: t.textMuted,
+                marginBottom: 8,
+              }}>
+                {servingOrders.length > 0 && <span>服务中 <b style={{color: t.success, fontWeight: 600}}>{servingOrders.length}</b></span>}
+                {reservedTodayOrders.length > 0 && <span>今日预约 <b style={{color: t.primary, fontWeight: 600}}>{reservedTodayOrders.length}</b></span>}
+              </div>
+            )}
+            {/* ⭐ 2026-10-05 00:56 奕霖立：预计等待（全局） */}
+            {(servingOrders.length + arrivedOrders.length + reservedTodayOrders.length) > 0 && (
+              <div style={{
+                fontSize: 11, color: t.textMuted,
+                marginBottom: 16,
+              }}>
+                现到店预计 <b style={{color: t.primary, fontWeight: 600}}>{globalEtaMin}</b> 分钟
+              </div>
+            )}
 
             {queueView === 'flat' ? (
               <div style={{
@@ -1847,14 +1857,13 @@ export default function BookingSection() {
                 marginRight: -4,
               } as React.CSSProperties}>
                 {[...arrivedOrders, ...reservedTodayOrders].length === 0 ? (
-                  <div style={{ padding: 16, textAlign: 'center' }}>
-                    <div style={{ color: t.textMuted, fontSize: 13 }}>
-                      😊 当前无人排队
+                  <div style={{ padding: '40px 16px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 14, color: t.text, marginBottom: 6 }}>
+                      当前无人排队
                     </div>
-                    {/* ⭐ 2026-10-05 00:56 奕霖立：空态降级 - 显示下一单 */}
-                    {/* ⭐ 2026-10-06 11:27 清禾修 Bug 2：明日预约不该混入实时空态（语义错，独立成 card） */}
-                    <div style={{ marginTop: 10, fontSize: 11, color: t.textMuted }}>
-                      📅 近期均无现场排队 · 可随时到店
+                    {/* ⭐ 2026-10-06 12:35 清禾改：方案 A 极简克制版（v1.1.28）— 删 emoji，padding 16→40 增留白 */}
+                    <div style={{ fontSize: 11, color: t.textMuted }}>
+                      随时可到店
                     </div>
                   </div>
                 ) : (
