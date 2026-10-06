@@ -104,24 +104,29 @@ export async function POST(request: NextRequest) {
 
     const db = getDb()
     const id = 'q_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-    // ⭐ v1.1.25 (2026-10-06 00:25 奕霖立)：INSERT 前查重（防 UNIQUE constraint failed on orderNo）
-    //   客户端显式传 orderNo 且已存在 → 409 + 友好错误
-    //   客户端没传 orderNo → 自动重命名加后缀直到唯一
-    let finalOrderNo: string = body.orderNo || ('A' + String(Date.now()).slice(-3))
-    if (body.orderNo) {
-      const exists = db.prepare('SELECT 1 FROM BarberQueue WHERE orderNo = ? AND merchantId = ?').get(finalOrderNo, merchantId)
-      if (exists) {
-        db.close()
-        return errorResponse(new Error(`orderNo '${finalOrderNo}' 已存在，请使用其他编号或省略 orderNo 自动生成`), 409)
-      }
-    } else {
-      for (let i = 0; i < 50; i++) {
-        const exists = db.prepare('SELECT 1 FROM BarberQueue WHERE orderNo = ? AND merchantId = ?').get(finalOrderNo, merchantId)
-        if (!exists) break
-        finalOrderNo = 'A' + String(Date.now() + i + 1).slice(-3)
-      }
-    }
     const orderType = body.type || 'booking'
+    // v1.1.31 (2026-10-06 18:57 qinghe fix Bug 3): orderNo collision root-fix (walk-in ticket phantom success)
+    //   OLD: client passes orderNo that already exists -> 409 reject.
+    //     But frontend already did optimistic setOrders + showed success popup -> row never persisted.
+    //     Then loadQueues() overwrote everything -> customer saw empty queue (this bug).
+    //   ROOT CAUSE: client computed orderNo as (count of in-progress orders + 1), so an idle shop
+    //     always recalculates B001/A001 -> collides with a used number -> 409 every single time.
+    //   NEW: keep prefix, increment numeric part until unique. Never drop a ticket on collision.
+    const _rawNo = String(body.orderNo || '').trim()
+    const _prefix = /^[AB]/i.test(_rawNo) ? _rawNo.charAt(0).toUpperCase() : (orderType === 'ticket' ? 'B' : 'A')
+    const _digitsOnly = _rawNo.replace(/[^0-9]/g, '')
+    let _seq = _digitsOnly ? parseInt(_digitsOnly, 10) : (Date.now() % 100000)
+    const _orderNoExists = (no: string) =>
+      !!db.prepare('SELECT 1 FROM BarberQueue WHERE orderNo = ? AND merchantId = ?').get(no, merchantId)
+    let finalOrderNo = ''
+    for (let i = 0; i < 500; i++) {
+      const candidate = _prefix + String(_seq).padStart(3, '0')
+      if (!_orderNoExists(candidate)) { finalOrderNo = candidate; break }
+      _seq++
+    }
+    if (!finalOrderNo) {
+      finalOrderNo = _prefix + Date.now().toString(36).toUpperCase().slice(-6)
+    }
     const customerName = body.customerName || ''
     const service = body.service || '剪发'
     const stylistName = body.stylistName || 'Will be assigned'

@@ -952,8 +952,22 @@ export default function BookingSection() {
   const hasActiveServing = !!myActiveOrder && myActiveOrder.status === 'serving'
 
   // ⭐ 2026-10-02 00:11 奕霖立：顺序号生成器（A 预约 / B 取号 + 3 位顺序号）
-  const nextBookingNo = 'A' + String(orders.filter(o => o.status === 'reserved').length + 1).padStart(3, '0')
-  const nextTicketNo = 'B' + String(orders.filter(o => o.status === 'arrived' || o.status === 'serving').length + 1).padStart(3, '0')
+  // v1.1.31 (2026-10-06 18:57 qinghe fix Bug 3 client side): orderNo = max historical sequence + 1
+  //   OLD: (in-progress count + 1). An idle shop has 0 in progress, so it always recalculates
+  //     B001/A001, colliding with an already used number -> server 409 -> row never persisted.
+  //   NEW: scan ALL records (including completed / cancelled), take max A/B sequence + 1.
+  const maxSeqOf = (prefix: string) => {
+    let max = 0
+    for (const o of orders as any[]) {
+      const no = String((o as any).no || '')
+      if (!no || no.charAt(0).toUpperCase() !== prefix) continue
+      const digits = no.replace(/[^0-9]/g, '')
+      if (digits) max = Math.max(max, parseInt(digits, 10))
+    }
+    return max
+  }
+  const nextBookingNo = 'A' + String(maxSeqOf('A') + 1).padStart(3, '0')
+  const nextTicketNo = 'B' + String(maxSeqOf('B') + 1).padStart(3, '0')
 
   // 店长模式（含 PIN 认证 + 自动锁定）
   const [managerMode, setManagerMode] = useState(false)
@@ -1108,12 +1122,113 @@ export default function BookingSection() {
     }).catch(() => {})
   }
 
+  // v1.1.32 (2026-10-06 19:20 qinghe fix Bug 4): shared shop-side cancel for booking / ticket / serving.
+  //   Removed the hardcoded fallback PIN: with a wrong PIN the old code still ran the local
+  //   confirm first, so a genuine server rejection looked like a silent no-op.
+  // v1.1.35 (2026-10-06 20:34 qinghe fix Bug 8): 店长取消改成自建弹窗 + PIN 输入 + 真实反馈
+  //   OLD: shopCancel 里用了 browser confirm()。该环境的 webview/PWA 会吞掉 confirm()，
+  //     点下去直接 return（用户反馈「没有弹窗」）。而且 qinghe-shop-pin 全项目没有写入点，
+  //     PIN 提示卡又是 {false && ...} 硬停用，所以这个 key 永远 null → 100% 拒绝。
+  //     （此前删掉 || '8888' 兜底是对的，但没补写入入口，等于把店长取消打成必失败。）
+  //   NEW: 不再用 confirm()。弹窗内直接输 PIN → 提交 → 按服务端返回的真实结果显示成败。
+  const [shopCancelPopup, setShopCancelPopup] = useState<null | {
+    order: Order; label: string; pin: string; error: string; busy: boolean
+  }>(null)
+  // v1.1.36: manager PIN is cached in memory for one session only, never written to storage.
+  //   lib/manager-auth.ts stores the shop PIN as SHA-256 hash + random salt precisely to avoid
+  //   plaintext; writing the plaintext to a localStorage key was a security regression. Removed.
+  const [shopPinCache, setShopPinCache] = useState('')
+
+  function shopCancel(o: Order, label: string) {
+    const stored = shopPinCache
+    setShopCancelPopup({ order: o, label, pin: stored, error: '', busy: false })
+  }
+
+  async function confirmShopCancel() {
+    const p = shopCancelPopup
+    if (!p || p.busy) return
+    const pin = p.pin.trim()
+    if (!pin) {
+      setShopCancelPopup({ ...p, error: '请输入店长 PIN', busy: false })
+      return
+    }
+    setShopCancelPopup({ ...p, busy: true, error: '' })
+    try {
+      const res = await fetch(`/api/queues/${p.order.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'cancelled',
+          cancelledBy: 'shop',
+          shopPin: pin,
+          cancelReason: '店长手动取消',
+        }),
+      })
+      const d = await res.json()
+      if (d.success) {
+        // 记住本次输入的 PIN，下次直接带入（补上缺失的写入入口）
+        setShopPinCache(pin)
+        setShopCancelPopup(null)
+        setToast(`✅ 已取消 ${p.order.customerName} 的${p.label}`)
+        setTimeout(() => setToast(''), 2500)
+        loadQueues()
+      } else {
+        setShopCancelPopup({ ...p, busy: false, error: d.error || '未知错误' })
+      }
+    } catch {
+      setShopCancelPopup({ ...p, busy: false, error: '网络错误，请重试' })
+    }
+  }
+  // v1.1.34 (2026-10-06 20:24 qinghe): 叫号推送 = 居中大弹窗 + 提示音 + 震动
+  //   OLD: 底部 toast，3.5 秒自动消失，店长容易错过；无任何声音/触感。
+  //   NEW: 居中弹窗需手动关闭；Web Audio 现场合成提示音（不依赖音频文件）；vibrate 震动。
+  //   震动说明：Android Chrome 支持 navigator.vibrate；iOS Safari 不提供该 API，会静默跳过。
+  const [callPopup, setCallPopup] = useState<null | {
+    name: string; phone: string; no: string; service: string; stylist: string; time: string
+  }>(null)
+
+  const playCallChime = () => {
+    try {
+      const Ctx: any = (window as any).AudioContext || (window as any).webkitAudioContext
+      if (!Ctx) return
+      const ctx = new Ctx()
+      if (ctx.state === 'suspended') ctx.resume()
+      const now = ctx.currentTime
+      const notes: Array<[number, number, number]> = [[988, 0, 0.16], [784, 0.2, 0.26]]
+      notes.forEach(([freq, at, dur]) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.value = freq
+        gain.gain.setValueAtTime(0.0001, now + at)
+        gain.gain.exponentialRampToValueAtTime(0.4, now + at + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + at + dur)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(now + at)
+        osc.stop(now + at + dur + 0.03)
+      })
+      setTimeout(() => { try { ctx.close() } catch {} }, 1000)
+    } catch (e: any) {
+      console.warn('[叫号] 提示音播放失败:', e)
+    }
+  }
+
   function callCustomer(id: string) {
     const o = orders.find(x => x.id === id)
     if (!o) return
-    setToast(`📢 叫号推送已发送 · ${o.customerName} (${o.customerPhone}) · 微信/短信`)
-    setTimeout(() => setToast(''), 3500)
     const t = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' })
+    setCallPopup({
+      name: o.customerName,
+      phone: o.customerPhone,
+      no: o.no || '',
+      service: o.service,
+      stylist: o.stylistName,
+      time: t,
+    })
+    playCallChime()
+    // 震动：Android 支持；iOS Safari 无此 API，静默降级
+    try { (navigator as any)?.vibrate?.([300, 120, 300, 120, 600]) } catch {}
     setActivities(prev => [{ time: t, text: `📢 叫号推送 · ${o.customerName}` }, ...prev].slice(0, 5))
   }
 
@@ -1148,7 +1263,13 @@ export default function BookingSection() {
   const nextTomorrowReservation = reservedTomorrowOrders[0]
   // ⭐ v1.1.20 (2026-10-05 12:25 奕霖立)：修公式漏 servingOrders 的 bug
   // 预计等待：新客走到店需等 服务中 + 已到店 + 今日预约 全中 × 15 分钟/人
-  const globalEtaMin = (servingOrders.length + arrivedOrders.length + reservedTodayOrders.length) * 15
+  // v1.1.38 (2026-10-06 21:13 qinghe fix): ETA must divide by the number of chairs, not 1.
+  //   OLD: (serving + arrived + reservedToday) * 15 assumed a single barber.
+  //     With Tony/Amy/Lily on shift, 4 people in line reported 60 min.
+  //   NEW: N stylists work in parallel, so N people clear per 15-min slot.
+  const chairs = Math.max(1, dynamicStylists.length)
+  const etaForAhead = (ahead: number) => Math.ceil(ahead / chairs) * 15
+  const globalEtaMin = etaForAhead(servingOrders.length + arrivedOrders.length + reservedTodayOrders.length)
 
   // 用户位置
   // ⭐ v1.1 (2026-10-04 18:48 奕霖"全做吧"双确认) · 改动 2:
@@ -1229,28 +1350,40 @@ export default function BookingSection() {
                 预计等待 <b style={{ fontSize: 16, fontFamily: 'monospace' }}>{userEtaMin}</b> 分钟
               </div>
             </div>
-            <button
-              onClick={async () => {
-                const label = userOrderType === 'booking' ? '预约' : '排队'
-                // ⭐ 2026-10-05 01:06 奕霖立：取消预约/排队（调 PATCH /api/queues/[id]）
-                if (!myActiveOrder) {
+            {myActiveOrder?.status === 'serving' ? (
+              /* v1.1.34: 店长点「开始理发」后，顶部卡片按钮同步变成「服务中」 */
+              <div style={{
+                background: 'rgba(255,255,255,0.28)',
+                border: '1px solid rgba(255,255,255,0.5)',
+                borderRadius: 8, padding: '6px 12px',
+                color: '#fff', fontSize: 12, fontWeight: 700,
+                display: 'flex', alignItems: 'center', gap: 5,
+                whiteSpace: 'nowrap',
+              }}>
+                💈 服务中
+              </div>
+            ) : (
+              <button
+                onClick={async () => {
+                  const label = userOrderType === 'booking' ? '预约' : '排队'
                   // 没找到 myActiveOrder（stale localStorage） · 只清本地
-                  setBookingSuccess(''); setTicketSuccess('')
-                  return
-                }
-                // ⭐ v1.1.23 (2026-10-05 13:06 奕霖立)：替 browser confirm() → 自定义 cancelPopup
-                setCancelPopup({ order: myActiveOrder, label })
-              }}
-              style={{
-                background: 'rgba(255,255,255,0.22)',
-                border: 'none', borderRadius: 8,
-                padding: '6px 12px',
-                color: '#fff', fontSize: 12,
-                cursor: 'pointer',
-              }}
-            >
-              ✕ 取消{userOrderType === 'booking' ? '预约' : '排队'}
-            </button>
+                  if (!myActiveOrder) {
+                    setBookingSuccess(''); setTicketSuccess('')
+                    return
+                  }
+                  setCancelPopup({ order: myActiveOrder, label })
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.22)',
+                  border: 'none', borderRadius: 8,
+                  padding: '6px 12px',
+                  color: '#fff', fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ 取消{userOrderType === 'booking' ? '预约' : '排队'}
+              </button>
+            )}
           </div>
         )}
 
@@ -1532,31 +1665,12 @@ export default function BookingSection() {
                                 color: t.primaryDark, border: `1px solid ${t.primary}`,
                                 borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                               }}>叫号推送</button>
-                              {/* ⭐ v1.1 改动 4: 店长取消（仅店长模式 + reserved 状态） */}
-                              <button
-                                onClick={() => {
-                                  if (confirm(`确认取消 ${o.customerName} 的预约？\n时段：${o.scheduledAt}\n理发师：${o.stylistName}`)) {
-                                    fetch(`/api/queues/${o.id}`, {
-                                      method: 'PATCH',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({
-                                        status: 'cancelled',
-                                        cancelledBy: 'shop',
-                                        shopPin: localStorage.getItem('qinghe-shop-pin') || '8888',
-                                        cancelReason: '店长手动取消',
-                                      }),
-                                    }).then(r => r.json()).then(d => {
-                                      if (d.success) loadQueues()
-                                      else alert('取消失败：' + (d.error || '未知错误'))
-                                    }).catch(() => alert('网络错误'))
-                                  }
-                                }}
-                                style={{
-                                  padding: '6px 10px', background: t.accent,
-                                  color: '#fff', border: 'none', borderRadius: 6,
-                                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                }}
-                              >✕ 取消</button>
+                              {/* v1.1.32: 店长统一取消（走 shopCancel，去掉假 PIN 兜底） */}
+                              <button onClick={() => shopCancel(o, '预约')} style={{
+                                padding: '6px 10px', background: t.accent,
+                                color: '#fff', border: 'none', borderRadius: 6,
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>✕ 取消</button>
                             </>
                           )}
                           {o.status === 'arrived' && (
@@ -1571,6 +1685,11 @@ export default function BookingSection() {
                                 color: t.primaryDark, border: `1px solid ${t.primary}`,
                                 borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                               }}>叫号推送</button>
+                              <button onClick={() => shopCancel(o, '排队')} style={{
+                                padding: '6px 10px', background: t.accent,
+                                color: '#fff', border: 'none', borderRadius: 6,
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>✕ 取消</button>
                             </>
                           )}
                           {o.status === 'serving' && (
@@ -1585,6 +1704,11 @@ export default function BookingSection() {
                                 color: t.primaryDark, border: `1px solid ${t.primary}`,
                                 borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                               }}>叫号推送</button>
+                              <button onClick={() => shopCancel(o, '服务中')} style={{
+                                padding: '6px 10px', background: t.accent,
+                                color: '#fff', border: 'none', borderRadius: 6,
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>✕ 取消</button>
                             </>
                           )}
                         </div>
@@ -1791,8 +1915,15 @@ export default function BookingSection() {
                       {currentBeijingTime}
                     </div>
                     <div style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>
-                      随时可到店
+                      {totalInQueue > 0
+                        ? '排队 ' + totalInQueue + ' 人'
+                        : '随时可到店'}
                     </div>
+                    {totalInQueue > 0 && (
+                      <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
+                        {'首位预计 ' + (servingOrders.length === 0 ? '可立即服务' : etaForAhead(servingOrders.length) + ' 分钟')}
+                      </div>
+                    )}
                   </>
                 )}
               </>
@@ -1952,6 +2083,12 @@ export default function BookingSection() {
                           <div style={{ fontSize: 11, color: t.textSecondary }}>
                             {item.service} · {isArrived ? '已到店等待' : '已预约'}
                           </div>
+                          {/* v1.1.37: 每位各自的预估等待时间（原来只有一个全局值） */}
+                          <div style={{ fontSize: 11, color: t.primary, marginTop: 3, fontWeight: 700 }}>
+                            {servingOrders.length === 0 && i === 0
+                              ? '可立即服务'
+                              : `预计 ${etaForAhead(servingOrders.length + i)} 分钟`}
+                          </div>
                         </div>
                         <div style={{
                           display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -1968,7 +2105,7 @@ export default function BookingSection() {
                             {i + 1}
                           </span>
                           <span style={{ fontSize: 9, fontWeight: 600, opacity: 0.95, marginTop: 2 }}>
-                            {isArrived ? '排队位' : '预约'}
+                            {isArrived ? `第 ${i + 1} 位` : '预约'}
                           </span>
                         </div>
                       </div>
@@ -2289,11 +2426,18 @@ export default function BookingSection() {
                     status: 'arrived',
                     scheduledAt: order.scheduledAt,
                     scheduledDate: 'today',
+                    arrivedAt: order.scheduledAt,
                   }),
                 }).then(r => r.json()).then(d => {
-                  if (d.success && d.pickupCode) {
-                    // ⭐ v1.1.23：拿 pickupCode 补进弹窗
-                    setSuccessPopup(prev => prev ? { ...prev, order: { ...prev.order, pickupCode: d.pickupCode } } : null)
+                  if (d.success) {
+                    // v1.1.31 (2026-10-06 18:57 qinghe fix Bug 3 C): server orderNo is authoritative.
+                    //   On collision the server auto-increments, so a local B001 may persist as B003.
+                    //   Without this the popup shows one number while the queue shows another.
+                    if (d.finalOrderNo && d.finalOrderNo !== order.no) {
+                      setOrders(prev => prev.map(o => o.id === order.id ? { ...o, no: d.finalOrderNo } : o))
+                      setTicketSuccess(d.finalOrderNo)
+                    }
+                    setSuccessPopup(prev => prev ? { ...prev, order: { ...prev.order, no: d.finalOrderNo || prev.order.no, pickupCode: d.pickupCode } } : null)
                   }
                   loadQueues()
                 }).catch(() => loadQueues())
@@ -2459,6 +2603,119 @@ export default function BookingSection() {
       )}
 
       {/* ⭐ v1.1.23 (2026-10-05 13:06 奕霖立)：取消确认弹窗（替 browser confirm()） */}
+      {/* v1.1.34 (2026-10-06 20:24): 叫号推送居中弹窗 + 提示音 + 震动 */}
+      {callPopup && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(20, 12, 6, 0.74)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 20, backdropFilter: 'blur(4px)',
+        }}>
+          <div style={{
+            width: '100%', maxWidth: 380,
+            background: 'linear-gradient(160deg, #fef3c7 0%, #fde68a 100%)',
+            border: '2px solid #b8860b', borderRadius: 20,
+            padding: '28px 22px 24px', textAlign: 'center',
+            boxShadow: '0 24px 70px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ fontSize: 12, color: '#92400e', letterSpacing: '0.22em', fontWeight: 700 }}>
+              叫号推送
+            </div>
+            <div style={{ fontSize: 38, fontWeight: 900, color: '#2c1810', marginTop: 12, lineHeight: 1.15 }}>
+              {callPopup.name}
+            </div>
+            <div style={{ fontSize: 15, color: '#78350f', marginTop: 8, fontWeight: 600 }}>
+              {callPopup.service} · {callPopup.stylist} 老师
+            </div>
+            <div style={{ fontSize: 13, color: '#92400e', marginTop: 6 }}>
+              {callPopup.no ? `单号 ${callPopup.no} · ` : ''}{callPopup.time} 请到店
+            </div>
+            <div style={{ fontSize: 12, color: '#92400e', marginTop: 10 }}>
+              📱 {callPopup.phone}
+            </div>
+            <div style={{ fontSize: 11, color: '#a16207', marginTop: 14, lineHeight: 1.7 }}>
+              仅本机提醒 · 顾客端推送尚未接入
+            </div>
+            <button
+              onClick={() => setCallPopup(null)}
+              style={{
+                marginTop: 18, width: '100%', padding: '13px 16px',
+                background: '#b8860b', color: '#fff', border: 'none', borderRadius: 12,
+                fontSize: 16, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
+      {/* v1.1.35 (2026-10-06 20:34): 店长取消确认弹窗（替代被吞掉的 confirm()） */}
+      {shopCancelPopup && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1100,
+          background: 'rgba(20, 12, 6, 0.72)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{
+            width: '100%', maxWidth: 360, background: '#fff',
+            borderRadius: 16, padding: '22px 20px', boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
+          }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: '#8b0000' }}>
+              确认取消{shopCancelPopup.label}
+            </div>
+            <div style={{ fontSize: 13, color: '#5b4636', marginTop: 12, lineHeight: 1.9 }}>
+              <div>👤 {shopCancelPopup.order.customerName}</div>
+              <div>💇 {shopCancelPopup.order.service} · {shopCancelPopup.order.stylistName} 老师</div>
+              <div>🕒 {shopCancelPopup.order.scheduledAt}</div>
+            </div>
+            <div style={{ fontSize: 12, color: '#8a7360', marginTop: 14, fontWeight: 600 }}>
+              店长 PIN
+            </div>
+            <input
+              type='password'
+              inputMode='numeric'
+              placeholder='请输入店长 PIN'
+              value={shopCancelPopup.pin}
+              onChange={(e) => setShopCancelPopup({ ...shopCancelPopup, pin: e.target.value })}
+              style={{
+                width: '100%', marginTop: 6, padding: '11px 12px',
+                border: '1px solid #d9c9b0', borderRadius: 10, fontSize: 16,
+                letterSpacing: '0.3em', outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+            {shopCancelPopup.error && (
+              <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 8 }}>
+                ❌ {shopCancelPopup.error}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                onClick={() => setShopCancelPopup(null)}
+                style={{
+                  flex: 1, padding: '12px', border: 'none', borderRadius: 10,
+                  background: '#f1e7d8', color: '#5b4636', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                再想想
+              </button>
+              <button
+                onClick={confirmShopCancel}
+                disabled={shopCancelPopup.busy}
+                style={{
+                  flex: 1, padding: '12px', border: 'none', borderRadius: 10,
+                  background: shopCancelPopup.busy ? '#c9b9a6' : '#8b0000', color: '#fff',
+                  fontSize: 14, fontWeight: 700, cursor: shopCancelPopup.busy ? 'wait' : 'pointer',
+                }}
+              >
+                {shopCancelPopup.busy ? '取消中…' : '确认取消'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: '#a8927c', marginTop: 12, textAlign: 'center' }}>
+              取消后该顾客会从实时排队中移除
+            </div>
+          </div>
+        </div>
+      )}
       {cancelPopup && (
         <div
           onClick={() => setCancelPopup(null)}

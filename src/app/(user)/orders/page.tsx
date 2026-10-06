@@ -74,6 +74,8 @@ export default function OrdersPage() {
 
   // ⭐ 奕霖 2026-09-06 22:51 升级: 未登录 → 弹 LoginModal (而不是静态提示), 不调 API 不查别人订单
   // ⭐ 2026-10-05 01:27 奕霖升级：只看 phone，不看 isLoggedIn（已登录的账号全模块通用，/orders 不再单独登录）
+  // v1.1.33 (2026-10-06 19:48): bump reloadKey from OrderCard so a cancel re-pulls the list.
+  const [reloadKey, setReloadKey] = useState(0)
   useEffect(() => {
     let cancelled = false
     if (!phone) {
@@ -161,7 +163,7 @@ export default function OrdersPage() {
     })()
     return () => { cancelled = true }
     // ⭐ 2026-10-05 01:28 奕霖修复：deps 加 phone，Zustand rehydrate 后 useEffect 重跑（之前 [] 永远只跑一次，hydrate 后 modal 关不掉）
-  }, [phone])
+  }, [phone, reloadKey])
 
   const stats = useMemo(() => ({
     all: orders.length,
@@ -370,7 +372,7 @@ export default function OrdersPage() {
                       ))}
                     </div>
                   )}
-                  <OrderCard data={o} />
+                  <OrderCard data={o} onChanged={() => setReloadKey(k => k + 1)} />
                 </div>
               )
             })}

@@ -23,6 +23,7 @@ import { OrderCardData } from '@/domain/chat/service'
 
 interface OrderCardProps {
   data: OrderCardData
+  onChanged?: () => void
 }
 
 // ⭐ v1.1.10 升级：深红家族（与 --accent: #8b0000 同色系），取消态灰化
@@ -37,7 +38,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   completed: { bg: 'rgba(127, 29, 29, 0.12)', text: '#7f1d1d' },
 }
 
-export default function OrderCard({ data }: OrderCardProps) {
+export default function OrderCard({ data, onChanged }: OrderCardProps) {
   const router = useRouter()
   const statusColor = STATUS_COLORS[data.status] || STATUS_COLORS.pending
   const isCancelled = data.status === 'cancelled'
@@ -62,30 +63,41 @@ export default function OrderCard({ data }: OrderCardProps) {
     router.push(`/orders/${data.orderId}`)
   }
 
-  // ⭐ 2026-07-13 01:15：加取消订单按钮（仅 pending 状态）
+  // v1.1.33 (2026-10-06 19:48 qinghe fix Bug 6): cancel through the real API, not the chat tool.
+  //   OLD: POST /api/chat with "取消订单 {no}", then trusted json.toolExecuted.
+  //     The chat agent knows nothing about BarberQueue-backed booking/ticket rows, so it could
+  //     report the tool as executed (success toast) while neither table changed.
+  //     router.refresh() cannot help either: it re-renders server components, but this list is
+  //     fetched client-side in a useEffect keyed on phone.
+  //   NEW: same endpoint the detail page uses. It resolves the BarberQueue id for booking/ticket
+  //     cards, verifies the phone on barber rows, and syncs both tables.
+  const [cancelling, setCancelling] = useState(false)
   const handleCancel = async (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (cancelling) return
     if (!await confirmDialog(`确定取消订单 ${data.orderNo}？\n取消后库存会退回。`)) return
+    const user = useUserStore?.getState?.()?.user
     try {
-      const user = useUserStore?.getState?.()?.user
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
+      setCancelling(true)
+      const resp = await fetch(`/api/orders/${data.orderId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [{ role: 'user', content: `取消订单 ${data.orderNo}` }],
-          userId: user?.id,
-          phone: user?.phone,
+          status: 'cancelled',
+          ...(isBookingType && user?.phone ? { customerPhone: user.phone } : {}),
         }),
       })
       const json = await resp.json()
-      if (json.toolExecuted?.includes?.('cancel_order')) {
-        toast.info('✅ 订单已取消')
-        router.refresh()
+      if (json.success) {
+        toast.info(`✅ 订单 ${data.orderNo} 已取消`)
+        onChanged?.()
       } else {
-        toast.error('❌ 取消失败：' + (json.reply || '未知错误'))
+        toast.error('❌ 取消失败：' + (json.error || '未知错误'))
       }
     } catch (err: any) {
-      toast.info('❌ 取消出错：' + (err?.message || err))
+      toast.error('❌ 取消出错：' + (err?.message || err))
+    } finally {
+      setCancelling(false)
     }
   }
 
