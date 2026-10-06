@@ -4,17 +4,29 @@
  * PushSetup.tsx - 顾客端「到号提醒」开关
  * 2026-10-07 清禾 - 造型项目叫号推送
  *
- * 覆盖场景：
- *   Android Chrome  : 一键开启，后台/锁屏都能收
- *   iOS Safari      : 必须先「添加到主屏幕」，本组件给引导
- *   兜底             : Wake Lock 保持屏幕常亮，前台轮询命中即响（iPhone 没装也有效）
+ * 重写原因 - 修死锁：
+ *   旧 bug: Notification.permission === 'granted' 就直接 set('on')，
+ *   但权限允许 != 订阅存在。之前授权成功、订阅 POST 失败之后，
+ *   组件永远显示「已开启」而服务端一条订阅都没有，用户再也点不到第二次。
+ *   现在: 权限允许时挂载即自动补订阅（subscribe() 不需要用户手势，
+ *   只有 requestPermission() 需要），并按 endpoint 幂等补登记。
  *
- * 订阅按 (phone, merchantId) 绑定，授权一次长期有效。
+ * 手机号可后补: upsertSubscription 以 endpoint 为冲突键并更新 phone，
+ *   所以先订阅、拿到手机号再补登记即可，服务端会自行认领。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-type Status = 'idle' | 'unsupported' | 'need-install' | 'denied' | 'on' | 'busy' | 'error'
+type Status =
+  | 'checking'
+  | 'unsupported'
+  | 'need-install'
+  | 'need-permission'
+  | 'denied'
+  | 'on'
+  | 'pending-phone'
+  | 'busy'
+  | 'error'
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4)
@@ -27,14 +39,18 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 
 function isIOS(): boolean {
   if (typeof navigator === 'undefined') return false
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
 }
 
 function isStandalone(): boolean {
   if (typeof window === 'undefined') return false
-  return (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
+  return (
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
     window.matchMedia('(display-mode: standalone)').matches
+  )
 }
 
 export default function PushSetup({
@@ -48,11 +64,11 @@ export default function PushSetup({
   compact?: boolean
   onStateChange?: (status: Status) => void
 }) {
-  const [status, setStatus] = useState<Status>('idle')
-  // 2026-10-07: iOS 加到主屏后无需刷新，点一下即可重新检测
+  const [status, setStatus] = useState<Status>('checking')
   const [probe, setProbe] = useState(0)
   const [msg, setMsg] = useState('')
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null)
+  const registeredRef = useRef<string>('')
 
   const set = useCallback(
     (s: Status) => {
@@ -60,26 +76,91 @@ export default function PushSetup({
       onStateChange?.(s)
     },
     [onStateChange]
-  );
+  )
 
-  // 初始化：注册 SW + 探测权限 + 兜底 Wake Lock
+  /**
+   * 拿到（或创建）订阅并向服务端登记。
+   * 只有 requestPermission() 需要用户手势；subscribe() 可在挂载时直接跑。
+   */
+  const ensureSubscribed = useCallback(async (): Promise<'on' | 'pending-phone' | 'need-permission' | 'denied'> => {
+    if (Notification.permission === 'denied') return 'denied'
+    if (Notification.permission !== 'granted') return 'need-permission'
+
+    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    await navigator.serviceWorker.ready
+
+    const res = await fetch('/api/push/vapid-public-key')
+    const { publicKey } = await res.json()
+    if (!publicKey) throw new Error('拿不到 VAPID 公钥')
+
+    let sub = await reg.pushManager.getSubscription()
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      })
+    }
+
+    // 按 endpoint 幂等补登记；手机号后补也没问题（服务端以 endpoint 为冲突键更新 phone）
+    const endpoint = sub.endpoint
+    const sig = endpoint + '|' + (phone || '') + '|' + merchantId
+    if (registeredRef.current !== sig) {
+      const r = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: phone || '',
+          merchantId,
+          subscription: sub.toJSON(),
+        }),
+      })
+      if (!r.ok) throw new Error('订阅保存失败 ' + r.status)
+      registeredRef.current = sig
+    }
+
+    return phone ? 'on' : 'pending-phone'
+  }, [phone, merchantId])
+
+  // 初始化：注册 SW -> 探测权限 -> 能自动修就自动修
   useEffect(() => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      set('unsupported')
-      return
+    let cancelled = false
+
+    const run = async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        set('unsupported')
+        return
+      }
+      if (isIOS() && !isStandalone()) {
+        set('need-install')
+        return
+      }
+      try {
+        const st = await ensureSubscribed()
+        if (!cancelled) set(st)
+      } catch (e) {
+        console.warn('[PushSetup] 自动补订阅失败:', e)
+        if (!cancelled) set('error')
+      }
     }
 
-    if (isIOS() && !isStandalone()) {
-      set('need-install')
-      return
+    run()
+    return () => {
+      cancelled = true
     }
+  }, [set, ensureSubscribed, probe])
 
-    if (Notification.permission === 'granted') set('on')
+  // 手机号后到：登录/取号拿到 phone 后自动补登记，不要求用户再点一次
+  useEffect(() => {
+    if (!phone) return
+    if (Notification.permission !== 'granted') return
+    if (isIOS() && !isStandalone()) return
+    if (registeredRef.current.endsWith('|' + phone + '|' + merchantId)) return
+    ensureSubscribed()
+      .then(st => set(st))
+      .catch(() => {})
+  }, [phone, merchantId, ensureSubscribed, set])
 
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => set('error'))
-  }, [set, probe]);
-
-  // 兜底：页面可见时保持屏幕常亮（iPhone 没装 PWA 也能响）
+  // 兜底：页面可见时保持屏幕常亮
   useEffect(() => {
     let cancelled = false
     const nav = navigator as unknown as {
@@ -96,7 +177,7 @@ export default function PushSetup({
         }
         wakeLockRef.current = wl
       } catch {
-        /* 拒绝或不支持，静默 */
+        /* 静默 */
       }
     }
     const onVis = () => {
@@ -110,9 +191,9 @@ export default function PushSetup({
       document.removeEventListener('visibilitychange', onVis)
       wakeLockRef.current?.release().catch(() => {})
     }
-  }, []);
+  }, [])
 
-  // 收到推送点击 → 回到页面
+  // 收到推送点击 -> 回到页面
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
     const onMsg = (e: MessageEvent) => {
@@ -120,13 +201,18 @@ export default function PushSetup({
     }
     navigator.serviceWorker.addEventListener('message', onMsg)
     return () => navigator.serviceWorker.removeEventListener('message', onMsg)
-  }, []);
+  }, [])
+
+  // 回到前台时重新核对（iOS 从后台切回会重连）
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') setProbe((n) => n + 1)
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
 
   const enable = useCallback(async () => {
-    if (!phone) {
-      setMsg('先取号，才能开启到号提醒')
-      return
-    }
     set('busy')
     setMsg('')
     try {
@@ -136,38 +222,28 @@ export default function PushSetup({
         setMsg('浏览器拒绝了通知权限')
         return
       }
-      const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      await navigator.serviceWorker.ready
-      const res = await fetch('/api/push/vapid-public-key')
-      const { publicKey } = await res.json()
-      if (!publicKey) throw new Error('拿不到 VAPID 公钥')
-
-      let sub = await reg.pushManager.getSubscription()
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey),
-        })
-      }
-
-      const r = await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, merchantId, subscription: sub.toJSON() }),
-      })
-      if (!r.ok) throw new Error('订阅保存失败')
-      set('on')
-      setMsg('已开启，到号会推送到这台手机')
+      registeredRef.current = ''
+      const st = await ensureSubscribed()
+      set(st)
+      if (st === 'on') setMsg('已开启，关掉页面也能收到叫号')
     } catch (e) {
       set('error')
       setMsg((e as Error).message || '开启失败')
     }
-  }, [phone, merchantId, set])
+  }, [ensureSubscribed, set])
 
   if (status === 'on') {
     return (
       <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
-        🔔 到号提醒已开启
+        🔔 到号提醒已开启（关页面也能收）
+      </span>
+    )
+  }
+
+  if (status === 'pending-phone') {
+    return (
+      <span style={{ fontSize: 12, color: '#92400e' }}>
+        🔔 已授权，取号/登录后自动绑定手机号
       </span>
     )
   }
@@ -179,15 +255,19 @@ export default function PushSetup({
         <div>1. 点底部「分享」按钮</div>
         <div>2. 选「添加到主屏幕」</div>
         <div>3. 回到桌面图标打开，再点这里</div>
-        <div style={{ marginTop: 4, opacity: 0.8 }}>（未添加时页面保持常亮，叫号也会响）</div>
         <button
           data-qh-probe-btn
           onClick={() => setProbe((n) => n + 1)}
           style={{
-            marginTop: 8, padding: '8px 14px',
-            background: '#b8860b', color: '#fff',
-            border: 'none', borderRadius: 8,
-            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            marginTop: 8,
+            padding: '8px 14px',
+            background: '#b8860b',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
           }}
         >
           我已添加到主屏，重新检测
@@ -197,7 +277,15 @@ export default function PushSetup({
   }
 
   if (status === 'unsupported') {
-    return <span style={{ fontSize: 12, color: '#78716c' }}>当前浏览器不支持推送，页面会保持常亮</span>
+    return (
+      <span style={{ fontSize: 12, color: '#78716c' }}>
+        当前浏览器不支持后台推送，页面会保持常亮
+      </span>
+    )
+  }
+
+  if (status === 'checking') {
+    return <span style={{ fontSize: 12, color: '#78716c' }}>检测推送状态…</span>
   }
 
   return (
@@ -223,5 +311,5 @@ export default function PushSetup({
         <div style={{ fontSize: 11, color: '#92400e', marginTop: 4 }}>{msg}</div>
       )}
     </div>
-  );
+  )
 }

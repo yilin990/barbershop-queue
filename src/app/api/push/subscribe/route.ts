@@ -15,9 +15,13 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { phone, merchantId, subscription } = body || {}
-    if (!phone || !merchantId || !subscription?.endpoint) {
+    // ⭐ 2026-10-07 清禾：手机号允许为空
+    //   upsertSubscription 以 endpoint 为冲突键并 UPDATE phone，
+    //   所以可以「先订阅、后补手机号」，客户端拿到登录/取号手机号后自动补登记。
+    //   卡住「必须先登录才能订阅」正是之前 iPhone 订阅一直建不成的根因之一。
+    if (!merchantId || !subscription?.endpoint) {
       return NextResponse.json(
-        { success: false, error: 'phone / merchantId / subscription.endpoint 必填' },
+        { success: false, error: 'merchantId / subscription.endpoint 必填' },
         { status: 400 }
       )
     }
