@@ -21,7 +21,7 @@ import { createHash } from 'crypto'
 import { signToken } from '@/lib/jwt'
 import { prisma } from '@/lib/db'
 import { parseCookie, buildSetCookie } from '@/lib/cookie'
-import { errorResponse, successResponse } from '@/lib/error'
+import { errorResponse, successResponse, AuthError } from '@/lib/error'
 
 export const runtime = 'nodejs'
 
@@ -35,16 +35,18 @@ export async function POST(request: NextRequest) {
   try {
     const trust = parseCookie(request.headers.get('cookie'), 'zhilin-trust')
     if (!trust || !trust.includes('.')) {
-      return errorResponse(new Error('本机未记住登录'))
+      // ⭐ 清禾 2026-10-07：这是正常登录状态，不是服务器故障
+      // 原来用 new Error → 500，前端/监控当内部错误处理，是「一登录就打不开」的帮凶
+      return errorResponse(new AuthError('本机未记住登录'))
     }
     const [userId, fingerprint] = trust.split('.')
     if (!userId || !fingerprint || fingerprint.length !== 32) {
-      return errorResponse(new Error('trust cookie 损坏'))
+      return errorResponse(new AuthError('trust cookie 损坏'))
     }
     // 设备指纹校验：cookie 拿到别的浏览器/电脑就用不了
     const expectedFp = getFingerprint(request)
     if (fingerprint !== expectedFp) {
-      return errorResponse(new Error('本机环境变化，请重新登录'))
+      return errorResponse(new AuthError('本机环境变化，请重新登录'))
     }
     // 查 user
     const user = await prisma.user.findUnique({

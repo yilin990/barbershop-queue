@@ -16,6 +16,31 @@ export default function LoginPage() {
   const codeInputRefs = useRef<(HTMLInputElement | null)[]>([])
   const { login, isLoggedIn } = useUserStore()
   const router = useRouter()
+  // ⭐ 清禾 2026-10-07 23:40：登录后回原页面
+  // 问题：从 /merchant/queue 进去登录，成功后被硬甩到 /merchant（350KB 字体 + 31 请求，慢设备直接白屏）
+  // 修法：记住来源（?redirect= 或 referer），登录后原路返回；兜底 /merchant/queue
+  const loginReturnTo = (): string => {
+    if (typeof window === 'undefined') return '/merchant/queue'
+    try {
+      const safe = (p: string | null) =>
+        p && p.startsWith('/') && !p.startsWith('//') ? p : null
+      let target = safe(new URLSearchParams(window.location.search).get('redirect'))
+      if (!target) {
+        const ref = document.referrer
+        if (ref) {
+          const u = new URL(ref)
+          if (u.host === window.location.host) {
+            const p = safe(u.pathname + u.search)
+            // 别把自己踢回 /login（会死循环）
+            if (p && u.pathname !== '/login') target = p
+          }
+        }
+      }
+      return target ?? '/merchant/queue'
+    } catch {
+      return '/merchant/queue'
+    }
+  }
   // ⭐ 奕霖 2026-07-03：开发者模式 (有 SHOW_DEV_CODE env 或 dev 模式) 才显示验证码
 // 后端同时配合：/api/auth/send-code 只有 SHOW_DEV_CODE=true 才返回 devCode
 const isDev =
@@ -37,7 +62,7 @@ const isDev =
   // ⭐ 清禾 2026-09-05 一键登录：本机已记住则 silent 登录
   useEffect(() => {
     if (isLoggedIn) {
-      router.push('/merchant')
+      router.push(loginReturnTo())
       return
     }
     // 读 document.cookie 找 zhilin-trust（httpOnly=false 不行,所以读不到 — 走 fallback 流程）
@@ -60,7 +85,7 @@ const isDev =
             lastLoginAt: data.user.lastLoginAt,
             token: data.token,
           }, data.token)
-          router.push('/merchant')
+          router.push(loginReturnTo())
         } else {
           // 本机未记住 / 设备变了 → 显示登录表单
           setLoading(false)
@@ -163,7 +188,7 @@ const isDev =
         lastLoginAt: data.user.lastLoginAt,
         token: data.token,
       }, data.token)
-      router.push('/merchant')
+      router.push(loginReturnTo())
     } catch {
       setError('网络错误，请重试')
     } finally {
