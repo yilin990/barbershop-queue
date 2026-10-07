@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AppLayout from '@/components/AppLayout'
 import OrderCard from '@/components/OrderCard'
 import { type OrderCardData } from '@/domain/chat/service'
-import { resolveServiceCategory } from '@/lib/serviceCategory'
+import { resolveServiceCategory, serviceCategoryLabel, serviceCategoryIcon } from '@/lib/serviceCategory'
 import { colors, fontSize, fontWeight, radius, spacing } from '@/lib/design-tokens'
 import { useUserStore } from '@/stores/userStore'
 import { useRouter } from 'next/navigation'
@@ -71,6 +71,8 @@ export default function OrdersPage() {
   // ⭐ v1.1.18 奕霖立：预约 vs 商品分类过滤（独立于状态过滤，可叠加）
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'booking' | 'product'>('all')
   // v1.1.47 按服务分类筛选（理发/染发/烫发/护发/造型）
+  const [serviceFilter, setServiceFilter] = useState<string>('all')
+  const [search, setSearch] = useState('')
   const [showLoginModal, setShowLoginModal] = useState(false)
 
   // ⭐ 奕霖 2026-09-06 22:51 升级: 未登录 → 弹 LoginModal (而不是静态提示), 不调 API 不查别人订单
@@ -197,6 +199,20 @@ export default function OrdersPage() {
     product: orders.filter(o => !o.source || o.source === 'normal' || o.source === 'pos-store' || o.source === 'flash_sale' || o.source === 'group' || o.source === 'activity').length,
   }), [orders])
 
+  // ⭐ v1.1.47 奕霖立：按服务分类统计（理发/染发/烫发/护发/造型）
+  const serviceStats = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const o of orders) {
+      const c = (o as any).serviceCategory || 'other'
+      m[c] = (m[c] || 0) + 1
+    }
+    return m
+  }, [orders])
+  // 只显示真有数据的分类，避免给用户一排空按钮
+  const serviceChips = useMemo(
+    () => ['cut', 'dye', 'perm', 'care', 'style', 'other'].filter(k => (serviceStats[k] || 0) > 0),
+    [serviceStats]
+  )
   const filtered = useMemo(() => {
     // 第一层：状态过滤
     let list = filter === 'all' ? orders : orders.filter(o => o.status === filter)
@@ -208,6 +224,10 @@ export default function OrdersPage() {
         list = list.filter(o => !o.source || o.source === 'normal' || o.source === 'pos-store' || o.source === 'flash_sale' || o.source === 'group' || o.source === 'activity')
       }
     }
+    // v1.1.47 服务分类过滤（与状态/预约分类三个维度可叠加）
+    if (serviceFilter !== 'all') {
+      list = list.filter(o => ((o as any).serviceCategory || 'other') === serviceFilter)
+    }
     const q = search.trim().toLowerCase()
     if (q) {
       list = list.filter(o =>
@@ -216,12 +236,16 @@ export default function OrdersPage() {
       )
     }
     return list
-  }, [orders, filter, categoryFilter, search])
+  }, [orders, filter, categoryFilter, search, serviceFilter])
 
   const filterLabel = (() => {
     const statusPart = filter === 'all' ? '全部' : filter === 'pending' ? '待核销' : filter === 'delivered' ? '已完成' : '已取消'
-    const categoryPart = categoryFilter === 'booking' ? '服务' : categoryFilter === 'product' ? '商品' : ''
-    return statusPart === '全部' ? '全部订单' : `已筛选 · ${statusPart}`
+    const categoryPart = categoryFilter === 'booking' ? '预约' : categoryFilter === 'product' ? '商品' : ''
+    // v1.1.47 服务分类也要进标签：点了「理发」标题还写「全部订单」，用户会以为没生效
+    const servicePart = serviceFilter !== 'all' ? serviceCategoryLabel(serviceFilter) : ''
+    const parts = [categoryPart, servicePart].filter(Boolean)
+    if (parts.length) return parts.join(' · ') + ' · ' + statusPart
+    return statusPart === '全部' ? '全部订单' : '已筛选 · ' + statusPart
   })()
 
   return (
@@ -276,7 +300,7 @@ export default function OrdersPage() {
             onClick={() => setCategoryFilter('all')}
           />
           <CategoryChip
-            label="📅 服务"
+            label="📅 预约"
             count={categoryStats.booking}
             active={categoryFilter === 'booking'}
             onClick={() => setCategoryFilter('booking')}
@@ -289,6 +313,30 @@ export default function OrdersPage() {
           />
         </div>
 
+        {/* ⭐ v1.1.47 奕霖立：按服务分类筛选（理发/染发/烫发/护发/造型） */}
+        {serviceChips.length > 1 && (
+          <div style={{
+            display: 'flex', gap: 10, marginBottom: 16,
+            flexWrap: 'wrap',
+          }}>
+            <CategoryChip
+              label="全部服务"
+              count={orders.length}
+              active={serviceFilter === 'all'}
+              onClick={() => setServiceFilter('all')}
+            />
+            {serviceChips.map(k => (
+              <CategoryChip
+                key={k}
+                label={serviceCategoryIcon(k) + ' ' + serviceCategoryLabel(k)}
+                count={serviceStats[k] || 0}
+                active={serviceFilter === k}
+                onClick={() => setServiceFilter(k)}
+              />
+            ))}
+          </div>
+        )}
+        {/* ⭐ v1.1.10 奕霖升级：分隔线 + 区段标签（仅当有订单时显示） */}
         {orders.length > 0 && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 12,
