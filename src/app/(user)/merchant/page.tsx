@@ -956,9 +956,12 @@ function MemberCardReal({ data, phone }: { data: any; phone: string }) {
     adjust: '调整', frozen: '冻结', unfreeze: '解冻',
   }
   const nx = c.nextLevel
-  const need = Math.max(0, Number(nx?.minRechargeYuan || 0) - Number(c.rechargeYuan || 0))
-  const pct = nx?.minRechargeYuan
-    ? Math.min(100, (Number(c.rechargeYuan || 0) / Number(nx.minRechargeYuan)) * 100)
+  // v1.1.42 修：接口返回的是 minRechargeCents(分)，不是 minRechargeYuan。
+  //   原来读错字段拿到 undefined，need 算成 0，于是永远显示「已达 金卡」。
+  const nxYuan = Number(nx?.minRechargeCents || 0) / 100
+  const need = Math.max(0, nxYuan - Number(c.rechargeYuan || 0))
+  const pct = nxYuan > 0
+    ? Math.min(100, (Number(c.rechargeYuan || 0) / nxYuan) * 100)
     : 0
   return (
     <div>
@@ -1003,7 +1006,7 @@ function MemberCardReal({ data, phone }: { data: any; phone: string }) {
         <div style={{ background: 'rgba(245,234,211,0.04)', borderRadius: 12, padding: 12, marginBottom: 16 }}>
           <div style={{ fontSize: 11, color: sub, marginBottom: 6 }}>
             {need > 0
-              ? '距 ' + nx.label + '（累计充值满 ' + yuan(nx.minRechargeYuan) + '）还差 ' + yuan(need)
+              ? '距 ' + nx.label + '（累计充值满 ' + yuan(nxYuan) + '）还差 ' + yuan(need)
               : '已达 ' + nx.label}
           </div>
           <div style={{ width: '100%', height: 6, background: 'rgba(245,234,211,0.1)', borderRadius: 3, overflow: 'hidden' }}>
