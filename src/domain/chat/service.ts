@@ -33,6 +33,8 @@ export interface OrderCardData {
   payMethod?: 'card' | 'wechat' | 'cash' | 'alipay'
   memberCardId?: string    // 用了哪张会员卡结算
   settledAt?: string       // 结算时间
+  // v1.1.47 服务分类（理发/染发/烫发/护发/造型），由 resolveServiceCategory 映射
+  serviceCategory?: string
   // ⭐ 2026-10-05 02:33 奕霖立：区分预约 vs 商品 — 用 source 判断 OrderCard 布局
   // 'booking'/'ticket' → 预约卡牌（服务/理发师/时间，不显示 ¥ 和 件数）
   // 'normal'/'pos-store'/'flash_sale'/'group'/'activity' → 商品卡牌（¥/件数/取货码，不显示 服务/理发师）

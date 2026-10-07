@@ -10,8 +10,9 @@
  */
 
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { DEFAULT_MERCHANT_ID, resolveMerchantIdFromQuery } from '@/lib/merchant'
+import { resolveServiceCategory, serviceCategoryLabel, serviceCategoryIcon } from '@/lib/serviceCategory'
 
 interface Card {
   id: string
@@ -77,6 +78,42 @@ function Inner() {
   const [orders, setOrders] = useState<any[]>([])
   // v1.1.43 区块折叠：记录多的时候一屏拉不到底
   const [open, setOpen] = useState({ logs: true, orders: false })
+  // ⭐ v1.1.47 奕霖立：流水按「充值/消费」分类，订单按「理发/染发/烫发/护发/造型」分类
+  const [logFilter, setLogFilter] = useState<'all' | 'recharge' | 'consume'>('all')
+  const [orderFilter, setOrderFilter] = useState<string>('all')
+
+  const logStats = useMemo(() => {
+    const m: Record<string, number> = { all: logs.length, recharge: 0, consume: 0 }
+    for (const l of logs) {
+      if (l.type === 'recharge') m.recharge++
+      else if (l.type === 'consume') m.consume++
+    }
+    return m
+  }, [logs])
+  const filteredLogs = useMemo(
+    () => (logFilter === 'all' ? logs : logs.filter((l: any) => l.type === logFilter)),
+    [logs, logFilter]
+  )
+
+  const orderStats = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const o of orders) {
+      const c = resolveServiceCategory(o.service) || 'other'
+      m[c] = (m[c] || 0) + 1
+    }
+    return m
+  }, [orders])
+  // 只显示真有数据的分类
+  const orderChips = useMemo(
+    () => ['cut', 'dye', 'perm', 'care', 'style', 'other'].filter(k => (orderStats[k] || 0) > 0),
+    [orderStats]
+  )
+  const filteredOrders = useMemo(
+    () => (orderFilter === 'all'
+      ? orders
+      : orders.filter((o: any) => (resolveServiceCategory(o.service) || 'other') === orderFilter)),
+    [orders, orderFilter]
+  )
 
   const load = useCallback(async (p: string) => {
     if (!/^1\d{10}$/.test(p)) { setState('bad'); return }
@@ -207,7 +244,13 @@ function Inner() {
           />
           {open.logs && (
           <div style={S.scroll}>
-            {logs.length ? logs.map(l => (
+            {/* ⭐ v1.1.47 奕霖立：流水分类（充值 / 消费） */}
+            <div style={S.chipRow}>
+              <Chip label="全部" count={logStats.all} active={logFilter === 'all'} onClick={() => setLogFilter('all')} />
+              <Chip label="充值" count={logStats.recharge} active={logFilter === 'recharge'} onClick={() => setLogFilter('recharge')} />
+              <Chip label="消费" count={logStats.consume} active={logFilter === 'consume'} onClick={() => setLogFilter('consume')} />
+            </div>
+            {filteredLogs.length ? filteredLogs.map(l => (
               <div key={l.id} style={S.logRow}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600 }}>
@@ -240,7 +283,22 @@ function Inner() {
           />
           {open.orders && (
           <div style={S.scroll}>
-            {orders.length ? orders.map(o => (
+            {/* ⭐ v1.1.47 奕霖立：订单按服务分类（理发/染发/烫发/护发/造型） */}
+            {orderChips.length > 1 && (
+              <div style={S.chipRow}>
+                <Chip label="全部" count={orders.length} active={orderFilter === 'all'} onClick={() => setOrderFilter('all')} />
+                {orderChips.map(k => (
+                  <Chip
+                    key={k}
+                    label={serviceCategoryIcon(k) + ' ' + serviceCategoryLabel(k)}
+                    count={orderStats[k] || 0}
+                    active={orderFilter === k}
+                    onClick={() => setOrderFilter(k)}
+                  />
+                ))}
+              </div>
+            )}
+            {filteredOrders.length ? filteredOrders.map(o => (
               <div key={o.id} style={S.logRow}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600 }}>
@@ -308,6 +366,7 @@ const S: any = {
   },
   secTitle: { fontSize: 13, fontWeight: 700, color: '#374151', margin: '18px 0 8px' },
   logs: { background: '#fff', borderRadius: 14, border: '1px solid #f0e6d2', overflow: 'hidden' },
+  chipRow: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
   // v1.1.43 卡片内滑动：记录多的时候别把页面撑到拉不到底
   scroll: {
     background: '#fff', borderRadius: 14, border: '1px solid #f0e6d2',
@@ -338,6 +397,30 @@ function FoldToggle({ title, count, open, onToggle }: {
         transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
         transition: 'transform .2s', color: '#9ca3af', fontSize: 11,
       }}>▼</span>
+    </button>
+  )
+}
+
+
+
+// ⭐ v1.1.47 奕霖立：会员卡页的分类筛选 chip（订单页有自己的 CategoryChip，不共用）
+function Chip({ label, count, active, onClick }: {
+  label: string; count: number; active: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '6px 12px', borderRadius: 999,
+        background: active ? '#b8860b' : '#f3f4f6',
+        border: active ? '1px solid #b8860b' : '1px solid #e5e7eb',
+        cursor: 'pointer', fontSize: 13, fontWeight: 700,
+        color: active ? '#fff' : '#374151',
+      }}
+    >
+      {label}
+      <span style={{ fontSize: 11, opacity: 0.85 }}>{count}</span>
     </button>
   )
 }
