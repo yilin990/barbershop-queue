@@ -36,6 +36,9 @@ export interface OrderItemInput {
 
 export interface CreateOrderInput {
   merchantCode?: string
+  /** v1.1.54 - 直接指定商户 ID, 优先于 merchantCode。
+   *  门店主页预约走这条, 避免 merchantCode 硬编码 (G0001 指向果蔬店)。 */
+  merchantId?: string
   customerName?: string
   phone: string
   items: OrderItemInput[]
@@ -51,6 +54,13 @@ export interface CreateOrderInput {
   source?: 'normal' | 'group' | 'admin'
   actualPaidAmount?: number
   posRecordedAmount?: number
+  /** v1.1.54 - 下单成功后同步写入理发店排队表 (BarberQueue),
+   *  让店长在排队页同时看到「到店取号」和「在线预约」。 */
+  enqueue?: boolean
+  /** 排队用: 服务名, 如「精剪造型」 */
+  enqueueService?: string
+  /** 排队用: 预约时间, 如 '14:30' */
+  scheduledAt?: string
 }
 
 export interface RedeemPickupInput {
@@ -104,14 +114,26 @@ export async function createOrder(input: CreateOrderInput) {
     throw new ValidationError('缺少必填字段: items (非空数组)')
   }
 
-  // 1. 找商户
-  const merchants = await prisma.$queryRaw<any[]>`
-    SELECT id, code, name FROM Merchant WHERE code = ${merchantCode} LIMIT 1
-  `
-  if (merchants.length === 0) {
-    throw new NotFoundError('商户不存在')
+  // 1. 找商户 - v1.1.54: merchantId 优先, 其次才按 code 解析
+  //    (原来只有 code 一条路, 全项目硬编码 G0001 -> m_grocery_001 果蔬店)
+  let merchantId: string
+  if (input.merchantId) {
+    const found = await prisma.$queryRaw<any[]>`
+      SELECT id, code, name FROM Merchant WHERE id = ${input.merchantId} LIMIT 1
+    `
+    if (found.length === 0) {
+      throw new NotFoundError('商户不存在')
+    }
+    merchantId = found[0].id
+  } else {
+    const merchants = await prisma.$queryRaw<any[]>`
+      SELECT id, code, name FROM Merchant WHERE code = ${merchantCode} LIMIT 1
+    `
+    if (merchants.length === 0) {
+      throw new NotFoundError('商户不存在')
+    }
+    merchantId = merchants[0].id
   }
-  const merchantId = merchants[0].id
 
   // 2. 找商品
   const productIds = items.map((it) => it.productId).filter(Boolean) as string[]

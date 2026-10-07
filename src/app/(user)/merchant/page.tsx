@@ -13,6 +13,9 @@ import { PinSetupModal } from '@/components/PinSetupModal'
 import { PinUnlockModal } from '@/components/PinUnlockModal'
 // ⭐ 2026-09-20 17:46 奕霖拍板：BookingSection 抽出为独立组件，merchant + queue 两处 100% 一致
 import BookingSection from '@/components/BookingSection'
+// v1.1.54 清禾：商户 ID 单一真相源。原来这里硬编码 merchantCode:'G0001'
+// → 那个 code 的真身是 m_grocery_001（果蔬店），理发店的 code 是 B0001。
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 import {
   hasPin, getRemindState, dismissRemind, isLockExpired,
   isInGracePeriod, getGraceRemainingMs,
@@ -91,7 +94,12 @@ export default function MerchantDisplayPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          merchantCode: 'G0001', // 造型师助手
+          // v1.1.54：直接传 merchantId，不再靠 G0001 猜商户
+          merchantId: DEFAULT_MERCHANT_ID,
+          // v1.1.54：下单后同步写排队表，店长在排队页能看到在线预约
+          enqueue: true,
+          enqueueService: bookingForm.service,
+          scheduledAt: bookingForm.time,
           customerName: bookingForm.name,
           phone: bookingForm.phone,
           items: [
@@ -114,7 +122,9 @@ export default function MerchantDisplayPage() {
       }
       // 显示订单号 + 积分
       setBookingResult({
-        orderNo: data.order.orderNo,
+        // v1.1.54：真实字段是顶层 orderNo。原来的 data.order.orderNo 会抛
+        // TypeError → 走进 catch → 顾客看到「网络错误」，其实单子已成功。
+        orderNo: data.orderNo || data.order?.orderNo || '',
         pointsAdded: data.membership?.pointsAdded ?? 0,
         totalPoints: data.membership?.newPointsBalance ?? 0,
       })
