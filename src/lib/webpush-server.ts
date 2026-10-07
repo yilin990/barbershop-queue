@@ -129,9 +129,17 @@ export async function pushToPhone(
   let pruned = 0
   for (const sub of subs) {
     try {
+      // ⭐ 2026-10-07 修「没有声音」：
+      //   web-push 不会自动设 apns-priority，APNs 默认 5（低优先级）
+      //   → iOS 静默投递，只进通知中心不响铃。必须显式给 10。
+      //   silent:false 明确要求有声（默认也是 false，写出来是为了不被误改）。
+      const isApple = /apple\.com|web\.push\.apple\.com/.test(sub.endpoint)
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-        JSON.stringify(payload)
+        JSON.stringify(payload),
+        isApple
+          ? { headers: { 'apns-priority': '10', 'apns-push-type': 'alert' }, silent: false }
+          : { silent: false }
       )
       sent++
     } catch (err) {

@@ -74,7 +74,10 @@ export async function POST(
       title: '到号提醒',
       body: [q.customerName, q.service, stylist, no].filter(Boolean).join(' · ') + ' 请到店',
       url: '/merchant',
-      tag: 'barber-call-' + q.id,
+      // ⭐ 2026-10-07 修「连续提醒不了」：
+      //   tag 相同 = Web Push 直接「替换」旧通知，不是新增，所以连着叫同一单只会看到一条。
+      //   改成每次叫号生成唯一 tag → 每次都是一条新通知，逐条累积。
+      tag: 'barber-call-' + q.id + '-' + Date.now().toString(36),
     }
 
     // SSE 优先: 页面开着就能收到 (iPhone Safari 零安装)
