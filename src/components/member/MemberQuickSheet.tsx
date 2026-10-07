@@ -304,13 +304,19 @@ function Btn({
 }
 
 const S: any = {
+  // v1.1.38 改：底部弹出被 AppLayout 的 BottomTabBar 压住，开卡按钮点不到。
+  // 改成屏幕正中，z-index 拉到 TabBar 之上。
   mask: {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
-    display: 'flex', alignItems: 'flex-end', zIndex: 999,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: '20px 16px', zIndex: 9999,
   },
   sheet: {
-    width: '100%', background: '#fff', borderRadius: '20px 20px 0 0',
-    padding: '18px 18px 30px', maxHeight: '90vh', overflowY: 'auto',
+    width: '100%', maxWidth: 440,
+    background: '#fff', borderRadius: 18,
+    padding: '18px 18px 20px',
+    maxHeight: '82vh', overflowY: 'auto',
+    boxShadow: '0 12px 40px rgba(0,0,0,.28)',
   },
   head: { display: 'flex', alignItems: 'flex-start', marginBottom: 14 },
   close: { background: 'none', border: 'none', fontSize: 26, color: '#9ca3af', cursor: 'pointer', lineHeight: 1 },
