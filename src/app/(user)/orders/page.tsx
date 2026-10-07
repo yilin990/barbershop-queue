@@ -236,7 +236,7 @@ export default function OrdersPage() {
       )
     }
     return list
-  }, [orders, filter, categoryFilter, search])
+  }, [orders, filter, categoryFilter, search, serviceFilter])
 
   const filterLabel = (() => {
     const statusPart = filter === 'all' ? '全部' : filter === 'pending' ? '待核销' : filter === 'delivered' ? '已完成' : '已取消'
