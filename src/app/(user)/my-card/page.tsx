@@ -148,7 +148,11 @@ function Inner() {
         <>
           <div style={S.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={S.badge(card.level)}>{card.levelLabel}</span>
+              {/* v1.1.42 修崩溃：S.badge 是样式对象(273行)，不是函数，
+                  原来写成 S.badge(card.level) 当函数调用 -> TypeError ->
+                  整个 /my-card 页面崩成「This page couldn't load」。
+                  带 ?phone= 才崩（要渲染卡才有这行），所以登录后才点得着。 */}
+              <span style={S.badge}>{card.levelLabel}</span>
               <span style={{ fontSize: 11, opacity: 0.6 }}>
                 {(card.discount * 10).toFixed(1)} 折
               </span>
