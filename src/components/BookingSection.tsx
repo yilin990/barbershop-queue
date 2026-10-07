@@ -30,6 +30,8 @@ import { PinUnlockModal } from './PinUnlockModal'
 import { useUserStore } from '@/stores/userStore'
 // v1.1.38 (2026-10-07 清禾) 会员卡：店长剪完头当场扣钱，不跳页面
 import MemberQuickSheet from '@/components/member/MemberQuickSheet'
+// v1.1.40 结算面板：完成服务 = 收款，一步做完
+import SettlementSheet from '@/components/member/SettlementSheet'
 import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 import PushSetup from '@/components/push/PushSetup'
 import CallListener from '@/components/push/CallListener'
@@ -1011,6 +1013,11 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
   // 弹窗
   const [modal, setModal] = useState<null | 'booking' | 'ticket' | 'agreement'>(null)
   // v1.1.38 会员弹层：记是哪一单，不记就不知道扣给谁
+  // v1.1.40 结算：点「完成 ✓」不再直接改状态，先走收款
+  const [settleFor, setSettleFor] = useState<null | {
+    id: string; no?: string; customerName: string; customerPhone: string
+    service?: string; stylistName?: string
+  }>(null)
   const [memberFor, setMemberFor] = useState<null | {
     phone: string; customerName: string; service?: string; orderNo?: string
   }>(null)
@@ -1731,7 +1738,15 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                           )}
                           {o.status === 'serving' && (
                             <>
-                              <button onClick={() => transition(o.id, 'completed', `🎉 ${o.customerName} 完成服务`)} style={{
+                              {/* v1.1.40 完成 = 结算，不再直接改状态（钱和状态绑一起才不漏） */}
+                              <button onClick={() => setSettleFor({
+                                id: o.id,
+                                no: (o as any).no,
+                                customerName: o.customerName,
+                                customerPhone: o.customerPhone,
+                                service: o.service,
+                                stylistName: o.stylistName,
+                              })} style={{
                                 padding: '6px 10px', background: t.success,
                                 color: '#fff', border: 'none', borderRadius: 6,
                                 fontSize: 11, fontWeight: 600, cursor: 'pointer',
@@ -2953,6 +2968,31 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
 
       {/* 叫号推送 Toast */}
       {/* v1.1.38 会员弹层：队列行点「会员」开这里 */}
+      {/* v1.1.40 结算面板：完成后弹收款，结算完问要不要叫下一位 */}
+      {settleFor && (() => {
+        const idx = displayedOrders.findIndex(x => x.id === settleFor.id)
+        const next = idx >= 0
+          ? displayedOrders.slice(idx + 1).find(
+              (x: any) => x.status === 'arrived' || x.status === 'reserved')
+          : null
+        return (
+          <SettlementSheet
+            merchantId={merchantId}
+            order={settleFor}
+            hasNext={!!next}
+            onNext={() => { if (next) callCustomer((next as any).id) }}
+            onClose={() => setSettleFor(null)}
+            onDone={() => {
+              transition(
+                settleFor.id,
+                'completed',
+                `结算完成 ${settleFor.customerName}`
+              )
+              loadQueues()
+            }}
+          />
+        )
+      })()}
       {memberFor && (
         <MemberQuickSheet
           merchantId={merchantId}
