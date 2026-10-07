@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+/* ⭐ 清禾 2026-10-08 00:05：删掉 Inter 的 Google Fonts @import
+ * 原因：@import 在渲染前必须下载+解析完，是阻塞渲染的。
+ * Inter 9 个字重 = 42 条 @font-face + 一次外部往返。
+ * 而 -apple-system 在 Mac/iPhone 上就是 San Francisco，视觉几乎无差别。
+ * 结果：少一个阻塞请求、少 42 条规则、离线也能正常显示。
+ */
 
 :root {
   /* ⭐ 2026-09-20 01:42 奕霖拍板：全局白色改暖米深棕沙龙配色 */
@@ -21,7 +26,7 @@
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
   background: var(--bg-deep);
   color: var(--text);
   line-height: 1.6;
