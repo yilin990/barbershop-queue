@@ -321,6 +321,33 @@ export default function OrderCard({ data, onChanged }: OrderCardProps) {
                   </span>
                 </div>
               )}
+              {/* v1.1.44 真实消费金额（来自 Settlement） */}
+              {data.finalAmount > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, color: 'rgba(44, 24, 16, 0.65)', fontWeight: 600, minWidth: 64 }}>💰 实付</span>
+                  <span style={{ fontSize: 20, color: '#b91c1c', fontWeight: 800 }}>
+                    ¥{data.finalAmount.toFixed(2)}
+                  </span>
+                  {data.listAmount != null && data.listAmount > data.finalAmount && (
+                    <span style={{ fontSize: 12, color: 'rgba(44,24,16,.5)', fontWeight: 600, textDecoration: 'line-through' }}>
+                      ¥{data.listAmount.toFixed(2)}
+                    </span>
+                  )}
+                  {data.discountRate != null && data.discountRate < 1 && (
+                    <span style={{ fontSize: 12, color: '#b45309', fontWeight: 700, background: 'rgba(245,158,11,.15)', padding: '2px 8px', borderRadius: 6 }}>
+                      {(data.discountRate * 10).toFixed(1).replace(/\.0$/, '')} 折
+                    </span>
+                  )}
+                </div>
+              )}
+              {data.payMethod && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 13, color: 'rgba(44, 24, 16, 0.65)', fontWeight: 600, minWidth: 64 }}>💳 支付</span>
+                  <span style={{ fontSize: 14, color: '#2c1810', fontWeight: 700 }}>
+                    {({ card: '会员卡余额', wechat: '微信', cash: '现金', alipay: '支付宝' } as Record<string, string>)[data.payMethod] || data.payMethod}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

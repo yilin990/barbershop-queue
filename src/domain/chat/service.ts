@@ -26,6 +26,13 @@ export interface OrderCardData {
   stylistName?: string      // 具体理发师 e.g. "Lily 老师" / "Tony"
   scheduledDate?: string    // YYYY-MM-DD（从 'tomorrow' word 转过来的真日期）
   scheduledTime?: string    // HH:MM e.g. "11:00"
+  // ⭐ v1.1.44 奕霖立：打通 Settlement —— BarberQueue 表没有金额列，真实金额在 Settlement 表
+  // 旧代码读 q.finalAmount（不存在）→ 永远 ¥0.00，所以「订单里看不见消费金额」
+  listAmount?: number      // 原价（元）
+  discountRate?: number    // 折扣率 0.95 = 95 折
+  payMethod?: 'card' | 'wechat' | 'cash' | 'alipay'
+  memberCardId?: string    // 用了哪张会员卡结算
+  settledAt?: string       // 结算时间
   // ⭐ 2026-10-05 02:33 奕霖立：区分预约 vs 商品 — 用 source 判断 OrderCard 布局
   // 'booking'/'ticket' → 预约卡牌（服务/理发师/时间，不显示 ¥ 和 件数）
   // 'normal'/'pos-store'/'flash_sale'/'group'/'activity' → 商品卡牌（¥/件数/取货码，不显示 服务/理发师）

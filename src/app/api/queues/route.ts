@@ -40,12 +40,15 @@ export async function GET(request: NextRequest) {
     if (phone && !merchantId) {
       const db = getDb()
       const rows = db.prepare(`
-        SELECT id, merchantId, orderNo, type, customerName, customerPhone,
-               service, stylistName, stylistCode, status, scheduledAt, scheduledDate,
-               arrivedAt, startedAt, completedAt, note, createdAt, updatedAt
-        FROM BarberQueue
-        WHERE customerPhone = ?
-        ORDER BY createdAt DESC
+        SELECT q.id, q.merchantId, q.orderNo, q.type, q.customerName, q.customerPhone,
+        q.service, q.stylistName, q.stylistCode, q.status, q.scheduledAt, q.scheduledDate,
+        q.arrivedAt, q.startedAt, q.completedAt, q.note, q.createdAt, q.updatedAt,
+        s.id AS settlementId, s.listCents, s.discountRate, s.dueCents,
+        s.payMethod, s.cardId AS settlementCardId, s.operator, s.createdAt AS settledAt
+        FROM BarberQueue q
+        LEFT JOIN Settlement s ON s.queueId = q.id
+        WHERE q.customerPhone = ?
+        ORDER BY q.createdAt DESC
         LIMIT 200
       `).all(phone)
       db.close()
@@ -62,21 +65,27 @@ export async function GET(request: NextRequest) {
     // ⭐ 2026-10-05 01:06 奕霖立：phone 可选（与 merchantId 配合过滤）
     const rows = phone
       ? db.prepare(`
-          SELECT id, merchantId, orderNo, type, customerName, customerPhone,
-                 service, stylistName, stylistCode, status, scheduledAt, scheduledDate,
-                 arrivedAt, startedAt, completedAt, note, createdAt, updatedAt
-          FROM BarberQueue
-          WHERE merchantId = ? AND customerPhone = ?
-          ORDER BY createdAt DESC
+          SELECT q.id, q.merchantId, q.orderNo, q.type, q.customerName, q.customerPhone,
+          q.service, q.stylistName, q.stylistCode, q.status, q.scheduledAt, q.scheduledDate,
+          q.arrivedAt, q.startedAt, q.completedAt, q.note, q.createdAt, q.updatedAt,
+          s.id AS settlementId, s.listCents, s.discountRate, s.dueCents,
+          s.payMethod, s.cardId AS settlementCardId, s.operator, s.createdAt AS settledAt
+          FROM BarberQueue q
+          LEFT JOIN Settlement s ON s.queueId = q.id
+          WHERE q.merchantId = ? AND q.customerPhone = ?
+          ORDER BY q.createdAt DESC
           LIMIT 200
         `).all(merchantId, phone)
       : db.prepare(`
-          SELECT id, merchantId, orderNo, type, customerName, customerPhone,
-                 service, stylistName, stylistCode, status, scheduledAt, scheduledDate,
-                 arrivedAt, startedAt, completedAt, note, createdAt, updatedAt
-          FROM BarberQueue
-          WHERE merchantId = ?
-          ORDER BY createdAt DESC
+          SELECT q.id, q.merchantId, q.orderNo, q.type, q.customerName, q.customerPhone,
+          q.service, q.stylistName, q.stylistCode, q.status, q.scheduledAt, q.scheduledDate,
+          q.arrivedAt, q.startedAt, q.completedAt, q.note, q.createdAt, q.updatedAt,
+          s.id AS settlementId, s.listCents, s.discountRate, s.dueCents,
+          s.payMethod, s.cardId AS settlementCardId, s.operator, s.createdAt AS settledAt
+          FROM BarberQueue q
+          LEFT JOIN Settlement s ON s.queueId = q.id
+          WHERE q.merchantId = ?
+          ORDER BY q.createdAt DESC
           LIMIT 200
         `).all(merchantId)
     db.close()

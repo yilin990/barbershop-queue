@@ -127,6 +127,10 @@ export default function OrdersPage() {
             const timeStr = q.scheduledAt || ''
             const serviceName = q.service || '理发服务'
             const stylistName = q.stylistName || '待分配理发师'
+            // ⭐ v1.1.44：真实金额来自 Settlement（/api/queues JOIN 出来的）
+            // 旧代码读 q.finalAmount —— BarberQueue 根本没这列 → 永远 ¥0.00
+            const dueYuan = q.dueCents != null ? q.dueCents / 100 : 0
+            const listYuan = q.listCents != null ? q.listCents / 100 : 0
             return {
               type: 'order' as const,
               orderId: q.id,
@@ -134,7 +138,12 @@ export default function OrdersPage() {
               status: m.s,
               statusLabel: m.label,
               pickupCode: q.pickupCode || undefined,
-              finalAmount: q.finalAmount ?? 0,
+              finalAmount: dueYuan,
+              listAmount: listYuan > 0 ? listYuan : undefined,
+              discountRate: q.discountRate != null ? q.discountRate : undefined,
+              payMethod: q.payMethod || undefined,
+              memberCardId: q.settlementCardId || undefined,
+              settledAt: q.settledAt || undefined,
               itemCount: 1,
               itemSummary: `${serviceName} · ${stylistName} · ${actualDate} ${timeStr}`.trim(),
               createdAt: q.createdAt || '',
@@ -172,7 +181,7 @@ export default function OrdersPage() {
     cancelled: orders.filter(o => o.status === 'cancelled').length,
   }), [orders])
 
-  // ⭐ v1.1.10 奕霖立：累计消费金额（只算已完成的 retail 订单，barber 暂不计）
+  // ⭐ v1.1.44：barber 已能拿到 Settlement 金额，累计消费现在包含理发消费
   const totalSpent = useMemo(() =>
     orders
       .filter(o => o.status === 'delivered' && (o.finalAmount || 0) > 0)
