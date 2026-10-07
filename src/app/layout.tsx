@@ -59,6 +59,12 @@ export default function RootLayout({
          * 👉 想恢复复古招牌字体：我可以自托管子集（不拉 442KB CSS），说一声就做。
          */}
 
+        {/* ⭐ 清禾 2026-10-08 00:15：自托管复古字体（Noto Serif SC / Rye / Alfa Slab One）
+         * 用 <link> 而不是 @import：@import 里写绝对路径会让 webpack 构建期解析失败，
+         * 且 @import 是串行阻塞的，这里 <link> 可以和主 CSS 并行。
+         * 18 块 CJK 子集 + 2 个拉丁字体，unicode-range 让浏览器只下当前屏幕用到的块。 */}
+        <link rel="stylesheet" href="/fonts/fonts.css" />
+
         {/* PWA Manifest */}
         <link rel="manifest" href="/manifest.json" />
 
