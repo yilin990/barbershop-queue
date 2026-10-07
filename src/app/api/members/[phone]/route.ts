@@ -18,6 +18,8 @@ import {
   getDb, getCard, listLogs, recharge, consume, adjust, setStatus,
   normalizePhone, assertMerchantId,
 } from '@/lib/member'
+// v1.1.38: 余额变动推给顾客（复用叫号那套 Web Push）
+import { pushToPhone } from '@/lib/webpush-server'
 
 export const runtime = 'nodejs'
 
@@ -92,7 +94,45 @@ export async function POST(
         throw new Error('未知 action: ' + action)
     }
 
-    return Response.json({ ok: true, card, logs: listLogs(db, merchantId, phone, 50) })
+    const logs = listLogs(db, merchantId, phone, 50)
+    db.close()
+    db = null
+
+    // ── 余额变动推送（事务已提交，这里才发）─────────────────
+    // tag 必须每次唯一：同 tag 的通知是「替换」不是「新增」
+    // （v1.1.36 叫号踩过这个坑：连着叫同一单只提醒一次）
+    let push: any = null
+    if (action === 'consume' || action === 'recharge') {
+      const uniq = 'member-' + action + '-' + card.id + '-' + Date.now().toString(36)
+      const myCardUrl =
+        '/my-card?phone=' + encodeURIComponent(phone) +
+        '&merchantId=' + encodeURIComponent(merchantId)
+      const amount = Number(body.amountYuan) || 0
+      push = await pushToPhone(
+        phone,
+        merchantId,
+        action === 'consume'
+          ? {
+              title: '消费提醒',
+              body:
+                (body.service || '消费') +
+                ' 实收 ¥' + amount.toFixed(2) +
+                '，卡内余额 ¥' + card.balanceYuan.toFixed(2),
+              url: myCardUrl,
+              tag: uniq,
+            }
+          : {
+              title: '充值成功',
+              body:
+                '卡内余额 ¥' + card.balanceYuan.toFixed(2) +
+                '，' + card.levelLabel + ' ' + (card.discount * 10).toFixed(1) + ' 折',
+              url: myCardUrl,
+              tag: uniq,
+            }
+      ).catch((e: any) => ({ sent: 0, failed: 1, pruned: 0, error: e?.message }))
+    }
+
+    return Response.json({ ok: true, card, logs, push })
   } catch (e: any) {
     return Response.json({ ok: false, error: e?.message || '操作失败' }, { status: 400 })
   } finally {
