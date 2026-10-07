@@ -52,8 +52,12 @@ export default function PushDoctor() {
       push('Service Worker', '注册失败 ' + (e as Error).message, false)
     }
 
-    push('通知权限', Notification.permission,
-      Notification.permission === 'granted' ? true : Notification.permission === 'denied' ? false : null)
+    // ⭐ 清禾 2026-10-08 00:02：iOS Safari 没有 Notification 全局，裸访问会抛 ReferenceError
+    const N = (typeof window !== 'undefined')
+      ? (window as unknown as { Notification?: typeof Notification }).Notification
+      : null
+    push('通知权限', N ? N.permission : '浏览器不支持',
+      N ? (N.permission === 'granted' ? true : N.permission === 'denied' ? false : null) : false)
 
     let sub: PushSubscription | null = null
     try { sub = reg ? await reg.pushManager.getSubscription() : null } catch { sub = null }
@@ -69,7 +73,9 @@ export default function PushDoctor() {
   const enable = useCallback(async () => {
     setBusy(true); setMsg('')
     try {
-      const perm = await Notification.requestPermission()
+      const N2 = (window as unknown as { Notification?: typeof Notification }).Notification
+      if (!N2) { setMsg('这个浏览器不支持 Web Push 通知'); setBusy(false); return }
+      const perm = await N2.requestPermission()
       if (perm !== 'granted') { setMsg('通知权限未允许：' + perm); setBusy(false); return }
       const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
       await navigator.serviceWorker.ready

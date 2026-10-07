@@ -53,6 +53,30 @@ function isStandalone(): boolean {
   )
 }
 
+/**
+ * ⭐ 清禾 2026-10-08 00:00：安全取 Notification
+ *
+ * 背景（iOS 模拟器 26.5 实测抓到的真凶）：
+ *   ReferenceError: Can't find variable: Notification
+ *   发生在 PushSetup 的 useEffect 里，依赖 [phone, ...]
+ *
+ * 完整因果链（完美吻合「不登录能开、一登录就白屏」）：
+ *   1. useEffect 第一行 if (!phone) return
+ *   2. 不登录 → user 为 null → phone 空 → 直接 return → 碰不到 Notification ✅
+ *   3. 登录后 → phone 有值 → 走到 if (Notification.permission !== 'granted')
+ *   4. iOS Safari 里 Notification 这个全局【不存在】
+ *      → 裸访问抛 ReferenceError（Safari 专属文案 "Can't find variable"）
+ *      → error boundary 捕获 → 整页白屏
+ *
+ * 为什么以前没炸：桌面 Chrome 有 Notification，iOS Safari 没有。
+ * 所以「同一份代码，Mac 上好好的，手机上必崩」。
+ */
+function getNotification(): typeof Notification | null {
+  if (typeof window === 'undefined') return null
+  const N = (window as unknown as { Notification?: typeof Notification }).Notification
+  return N || null
+}
+
 export default function PushSetup({
   phone,
   merchantId,
@@ -82,9 +106,11 @@ export default function PushSetup({
    * 拿到（或创建）订阅并向服务端登记。
    * 只有 requestPermission() 需要用户手势；subscribe() 可在挂载时直接跑。
    */
-  const ensureSubscribed = useCallback(async (): Promise<'on' | 'pending-phone' | 'need-permission' | 'denied'> => {
-    if (Notification.permission === 'denied') return 'denied'
-    if (Notification.permission !== 'granted') return 'need-permission'
+  const ensureSubscribed = useCallback(async (): Promise<'on' | 'pending-phone' | 'need-permission' | 'denied' | 'unsupported'> => {
+    const N = getNotification()
+    if (!N) return 'unsupported'
+    if (N.permission === 'denied') return 'denied'
+    if (N.permission !== 'granted') return 'need-permission'
 
     const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
     await navigator.serviceWorker.ready
@@ -152,7 +178,8 @@ export default function PushSetup({
   // 手机号后到：登录/取号拿到 phone 后自动补登记，不要求用户再点一次
   useEffect(() => {
     if (!phone) return
-    if (Notification.permission !== 'granted') return
+    const N = getNotification()
+    if (!N || N.permission !== 'granted') return
     if (isIOS() && !isStandalone()) return
     if (registeredRef.current.endsWith('|' + phone + '|' + merchantId)) return
     ensureSubscribed()
@@ -216,7 +243,9 @@ export default function PushSetup({
     set('busy')
     setMsg('')
     try {
-      const perm = await Notification.requestPermission()
+      const N = getNotification()
+      if (!N) { set('unsupported'); setMsg('这个浏览器不支持通知'); return }
+      const perm = await N.requestPermission()
       if (perm !== 'granted') {
         set('denied')
         setMsg('浏览器拒绝了通知权限')
