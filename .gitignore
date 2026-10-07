@@ -85,3 +85,10 @@ secrets/
 *.bak-*
 prisma/*.db-shm
 prisma/*.db-wal
+
+# v1.1.38: dev.db 是运行中的生产库且 journal_mode=wal
+# 提交的是过期主文件（WAL 里的新数据不在），比不提交更危险
+# 备份请用 .openclaw/tmp/stage/snapshot.cjs (VACUUM INTO)
+prisma/dev.db
+prisma/dev.db-wal
+prisma/dev.db-shm

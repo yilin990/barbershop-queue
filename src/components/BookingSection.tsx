@@ -28,6 +28,8 @@ import {
 import { PinSetupModal } from './PinSetupModal'
 import { PinUnlockModal } from './PinUnlockModal'
 import { useUserStore } from '@/stores/userStore'
+// v1.1.38 (2026-10-07 清禾) 会员卡：店长剪完头当场扣钱，不跳页面
+import MemberQuickSheet from '@/components/member/MemberQuickSheet'
 import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 import PushSetup from '@/components/push/PushSetup'
 import CallListener from '@/components/push/CallListener'
@@ -1008,6 +1010,10 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
 
   // 弹窗
   const [modal, setModal] = useState<null | 'booking' | 'ticket' | 'agreement'>(null)
+  // v1.1.38 会员弹层：记是哪一单，不记就不知道扣给谁
+  const [memberFor, setMemberFor] = useState<null | {
+    phone: string; customerName: string; service?: string; orderNo?: string
+  }>(null)
   const [bookingSuccess, setBookingSuccess] = useState('')
   const [ticketSuccess, setTicketSuccess] = useState('')
   // ⭐ v1.1 (2026-10-04 18:48 奕霖"全做吧"双确认) · 改动 2:
@@ -1742,6 +1748,20 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                               }}>✕ 取消</button>
                             </>
                           )}
+                          {/* v1.1.38 会员入口：放在三个状态分支之外，所有状态都能点 */}
+                          <button
+                            onClick={() => setMemberFor({
+                              phone: o.customerPhone,
+                              customerName: o.customerName,
+                              service: o.service,
+                              orderNo: (o as any).no,
+                            })}
+                            style={{
+                              padding: '6px 10px', background: '#b8860b',
+                              color: '#fff', border: 'none', borderRadius: 6,
+                              fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                          >会员</button>
                         </div>
                       </div>
                     )
@@ -2932,6 +2952,17 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
       )}
 
       {/* 叫号推送 Toast */}
+      {/* v1.1.38 会员弹层：队列行点「会员」开这里 */}
+      {memberFor && (
+        <MemberQuickSheet
+          merchantId={merchantId}
+          phone={memberFor.phone}
+          customerName={memberFor.customerName}
+          service={memberFor.service}
+          orderNo={memberFor.orderNo}
+          onClose={() => setMemberFor(null)}
+        />
+      )}
       {toast && (
         <div onClick={() => setToast('')} style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
