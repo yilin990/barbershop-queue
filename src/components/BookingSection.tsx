@@ -2427,6 +2427,11 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
         {/* v1.1.41 顾客查余额入口（常驻）
             之前只能靠推送点链接 / 手输 URL，顾客自己根本找不到 —— 那事等于没做完。
             放在预约/取号区下方常驻，不依赖当前有没有进行中的单。 */}
+        {/* v1.1.57 奕霖 2026-10-08 01:54 标注指定的位置：
+            店长模式下「我的会员卡」右上角加「✎ 编辑」，点开进会员管理面板。
+            之前 v1.1.56 把入口放在 /merchant 主页，但店长天天用的是排队页，
+            「我的会员卡」就在眼前却要点不到 —— 位置错了。 */}
+        <div style={{ position: 'relative' }}>
         <button
           onClick={() => router.push(
             currentUserPhone
@@ -2454,6 +2459,25 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
           </span>
           <span style={{ opacity: 0.5, fontSize: 18 }}>›</span>
         </button>
+        {managerMode && (
+          <button
+            onClick={() => router.push('/merchant/members')}
+            title="会员管理面板（充值/扣款/调整/冻结/开卡）"
+            style={{
+              position: 'absolute', top: 6, right: 6,
+              padding: '3px 8px',
+              background: 'rgba(184, 134, 11, 0.18)',
+              border: '1px solid #b8860b',
+              borderRadius: 6,
+              fontSize: 10, fontWeight: 600,
+              color: '#b8860b',
+              cursor: 'pointer',
+              zIndex: 2,
+              boxShadow: '0 2px 6px rgba(184, 134, 11, 0.2)',
+            }}
+          >✎ 编辑</button>
+        )}
+        </div>
       </div>
 
       {/* 弹窗 */}
