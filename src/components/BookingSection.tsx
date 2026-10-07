@@ -104,7 +104,7 @@ function ActionButton({ icon, label, onClick, t }: {
     <button
       onClick={onClick}
       style={{
-        padding: '16px 18px',
+        padding: '16px 14px',
         background: t.bgCard,
         border: `1px solid ${t.border}`,
         borderRadius: 12,
@@ -113,10 +113,14 @@ function ActionButton({ icon, label, onClick, t }: {
         color: t.text,
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         boxShadow: '0 2px 8px rgba(184, 134, 11, 0.06)',
+        // ⭐ 清禾 2026-10-08：按钮区锁死 2 列后，每格在 iPhone 上只有 ~165px。
+        // grid 子项默认 min-width:auto，内容 min-content 会撑破格子 → 加 0 让文字可收缩。
+        minWidth: 0,
+        width: '100%',
       }}
     >
-      <span style={{ fontSize: 20 }}>{icon}</span>
-      <span>{label}</span>
+      <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
+      <span style={{ minWidth: 0, textAlign: 'center' }}>{label}</span>
     </button>
   )
 }
@@ -2336,10 +2340,20 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
           </div>
         )}
 
-        {/* 按钮区 */}
+        {/* 按钮区
+         * ⭐ 清禾 2026-10-08 00:10 奕霖拍板：任何设备都固定左右各一个（2×2）
+         *
+         * 之前是 repeat(auto-fit, minmax(160px, 1fr)) —— auto-fit 要放 2 列需要
+         * 容器 ≥ 160×2 + 12gap = 332px。iPhone 17 内容区被层层 padding 吃到
+         * ~330px，差 2px 就落回 1 列；而宽视口又自动变 2 列 → 同一份代码
+         * 不同设备长得不一样。
+         *
+         * 现在锁死 2 列；minmax(0, 1fr) 代替 1fr，是为了防止按钮内容
+         * 的 min-content 撑破格子导致溢出。
+         */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           gap: 12, marginBottom: 16,
         }}>
           <ActionButton icon="📅" label="在线预约" onClick={() => setModal('booking')} t={t} />
