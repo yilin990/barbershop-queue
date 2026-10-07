@@ -2409,6 +2409,37 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
             ✅ 取号成功！排队号 <b style={{ fontSize: 18, fontFamily: 'monospace' }}>{ticketSuccess}</b>
           </div>
         )}
+
+        {/* v1.1.41 顾客查余额入口（常驻）
+            之前只能靠推送点链接 / 手输 URL，顾客自己根本找不到 —— 那事等于没做完。
+            放在预约/取号区下方常驻，不依赖当前有没有进行中的单。 */}
+        <button
+          onClick={() => router.push(
+            currentUserPhone
+              ? '/my-card?phone=' + encodeURIComponent(currentUserPhone)
+              : '/my-card'
+          )}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+            padding: '12px 14px', marginTop: 2,
+            background: 'rgba(184, 134, 11, 0.06)',
+            border: '1px solid rgba(184, 134, 11, 0.25)',
+            borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+            fontSize: 13, fontWeight: 700, color: '#5d3a1f',
+          }}
+        >
+          <span style={{ fontSize: 20 }}>💳</span>
+          <span style={{ flex: 1 }}>
+            我的会员卡
+            <span style={{
+              display: 'block', fontSize: 11, fontWeight: 400,
+              opacity: 0.7, marginTop: 2,
+            }}>
+              查余额 · 看充值和消费记录
+            </span>
+          </span>
+          <span style={{ opacity: 0.5, fontSize: 18 }}>›</span>
+        </button>
       </div>
 
       {/* 弹窗 */}
@@ -2658,8 +2689,22 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                     fontSize: 14, fontWeight: 700, cursor: 'pointer',
                   }}>继续逛逛</button>
               </div>
+              {/* v1.1.41 成功弹窗里也放一个：刚取完号，他正好想知道卡里还剩多少 */}
+              <button
+                onClick={() => {
+                  setSuccessPopup(null)
+                  router.push('/my-card?phone=' + encodeURIComponent(successPopup.order.customerPhone || ''))
+                }}
+                style={{
+                  width: '100%', marginTop: 10, padding: '9px',
+                  background: 'transparent', color: '#b8860b',
+                  border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                💳 查看我的会员卡余额 ›
+              </button>
               <div style={{
-                fontSize: 10, color: '#8d6e63', marginTop: 10, textAlign: 'center',
+                fontSize: 10, color: '#8d6e63', marginTop: 6, textAlign: 'center',
               }}>
                 ⏱️ <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{successPopup.countdown ?? 5}</span> 秒后自动关闭 · 点击背景也可关闭
               </div>
@@ -2970,9 +3015,13 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
       {/* v1.1.38 会员弹层：队列行点「会员」开这里 */}
       {/* v1.1.40 结算面板：完成后弹收款，结算完问要不要叫下一位 */}
       {settleFor && (() => {
-        const idx = displayedOrders.findIndex(x => x.id === settleFor.id)
+        // v1.1.41 修崩溃：原来用的是 displayedOrders，
+        //   那是 1649 行 JSX IIFE 里的局部常量，本作用域根本拿不到
+        //   点「完成」直接 ReferenceError，结算面板永远打不开。
+        //   改用顶层 activeOrders(1296 行)，组件作用域内一定有。
+        const idx = activeOrders.findIndex(x => x.id === settleFor.id)
         const next = idx >= 0
-          ? displayedOrders.slice(idx + 1).find(
+          ? activeOrders.slice(idx + 1).find(
               (x: any) => x.status === 'arrived' || x.status === 'reserved')
           : null
         return (
