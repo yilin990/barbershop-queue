@@ -56,6 +56,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { useUserStore } from '@/stores/userStore'
+import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 
 interface CommentItem {
   id: string
@@ -146,6 +147,18 @@ export default function MePage({
   const [birthdayModalOpen, setBirthdayModalOpen] = useState(false)
   const [phoneModalOpen, setPhoneModalOpen] = useState(false)
   const [savingQuick, setSavingQuick] = useState(false)
+  // ⭐ v1.1.46 奕霖立：/me 加「我的会员卡」—— 余额直接显示，不跳页也知道还剩多少
+  const [memberCard, setMemberCard] = useState<any>(null)
+  useEffect(() => {
+    const p = user?.phone || ''
+    if (!/^1\d{10}$/.test(p)) { setMemberCard(null); return }
+    let dead = false
+    fetch('/api/members/' + encodeURIComponent(p) + '?merchantId=' + DEFAULT_MERCHANT_ID, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (!dead) setMemberCard(j.ok ? j.card : null) })
+      .catch(() => { if (!dead) setMemberCard(null) })
+    return () => { dead = true }
+  }, [user?.phone])
 
   // ⭐ 奕霖 2026-07-05：24 个可选头像（去重 + 更可爱，6 草药 + 6 动物 + 6 符号 + 6 造型）
   const AVATAR_OPTIONS = [
@@ -621,6 +634,46 @@ export default function MePage({
                 </div>
               </button>
             </div>
+            {/* ⭐ v1.1.46 奕霖立：我的会员卡 —— 余额/等级直接显示，点进去看明细 */}
+            <button
+              onClick={() => router.push(
+                user?.phone
+                  ? '/my-card?phone=' + encodeURIComponent(user.phone)
+                  : '/my-card'
+              )}
+              style={{
+                padding: '14px 16px', borderRadius: '14px', cursor: 'pointer', textAlign: 'left',
+                width: '100%', marginBottom: '6px',
+                background: 'linear-gradient(135deg, rgba(184, 134, 11, 0.18) 0%, rgba(212, 160, 23, 0.26) 100%)',
+                border: '1px solid rgba(184, 134, 11, 0.4)',
+                display: 'flex', alignItems: 'center', gap: '12px',
+              }}
+            >
+              <div style={{ fontSize: '24px' }}>💳</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#b8860b', marginBottom: '2px' }}>
+                  我的会员卡
+                </div>
+                {memberCard ? (
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#fbbf24', fontWeight: 800, fontSize: 16 }}>
+                      ¥{Number(memberCard.balanceYuan || 0).toFixed(2)}
+                    </span>
+                    <span>{memberCard.levelLabel}</span>
+                    {Number(memberCard.discount || 1) < 1 && (
+                      <span>
+                        · {(Number(memberCard.discount) * 10).toFixed(1)} 折
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)' }}>
+                    {user?.phone ? '查余额 · 看充值与消费明细' : '登录后查看余额与明细'}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: '20px', color: 'rgba(255,255,255,0.3)' }}>→</div>
+            </button>
             {/* 活动中心单独一行 */}
             <button
               onClick={() => router.push('/activity')}
