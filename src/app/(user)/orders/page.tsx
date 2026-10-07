@@ -240,7 +240,7 @@ export default function OrdersPage() {
 
   const filterLabel = (() => {
     const statusPart = filter === 'all' ? '全部' : filter === 'pending' ? '待核销' : filter === 'delivered' ? '已完成' : '已取消'
-    const categoryPart = categoryFilter === 'booking' ? '预约' : categoryFilter === 'product' ? '商品' : ''
+    const categoryPart = categoryFilter === 'booking' ? '服务' : categoryFilter === 'product' ? '商品' : ''
     // v1.1.47 服务分类也要进标签：点了「理发」标题还写「全部订单」，用户会以为没生效
     const servicePart = serviceFilter !== 'all' ? serviceCategoryLabel(serviceFilter) : ''
     const parts = [categoryPart, servicePart].filter(Boolean)
@@ -300,7 +300,7 @@ export default function OrdersPage() {
             onClick={() => setCategoryFilter('all')}
           />
           <CategoryChip
-            label="📅 预约"
+            label="📅 服务"
             count={categoryStats.booking}
             active={categoryFilter === 'booking'}
             onClick={() => setCategoryFilter('booking')}
@@ -313,29 +313,9 @@ export default function OrdersPage() {
           />
         </div>
 
-        {/* ⭐ v1.1.47 奕霖立：按服务分类筛选（理发/染发/烫发/护发/造型） */}
-        {serviceChips.length > 1 && (
-          <div style={{
-            display: 'flex', gap: 10, marginBottom: 16,
-            flexWrap: 'wrap',
-          }}>
-            <CategoryChip
-              label="全部服务"
-              count={orders.length}
-              active={serviceFilter === 'all'}
-              onClick={() => setServiceFilter('all')}
-            />
-            {serviceChips.map(k => (
-              <CategoryChip
-                key={k}
-                label={serviceCategoryIcon(k) + ' ' + serviceCategoryLabel(k)}
-                count={serviceStats[k] || 0}
-                active={serviceFilter === k}
-                onClick={() => setServiceFilter(k)}
-              />
-            ))}
-          </div>
-        )}
+        {/* v1.1.48 奕霖要求：去掉「全部服务 / 理发 / 其他」三个服务分类按钮。
+            筛选逻辑（serviceFilter / serviceChips）保留休眠，serviceFilter 恒为 'all'；
+            要恢复只要把这块 JSX 加回来。 */}
         {/* ⭐ v1.1.10 奕霖升级：分隔线 + 区段标签（仅当有订单时显示） */}
         {orders.length > 0 && (
           <div style={{
