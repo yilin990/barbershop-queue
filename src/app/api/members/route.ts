@@ -11,10 +11,16 @@ import { NextRequest } from 'next/server'
 import {
   getDb, listCards, openCard, summary, assertMerchantId, normalizePhone,
 } from '@/lib/member'
+// v1.1.55 清禾：列表含全部会员余额/流水，开卡是写操作 —— 都要求店长
+import { requireManager } from '@/lib/require-manager'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
+  const auth = requireManager(request)
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, { status: auth.status })
+  }
   try {
     const { searchParams } = new URL(request.url)
     const merchantId = assertMerchantId(searchParams.get('merchantId') || '')
@@ -35,6 +41,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = requireManager(request)
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, { status: auth.status })
+  }
   let db: any = null
   try {
     const body = await request.json()

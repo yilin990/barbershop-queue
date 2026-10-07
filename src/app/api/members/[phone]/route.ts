@@ -20,6 +20,9 @@ import {
 } from '@/lib/member'
 // v1.1.38: 余额变动推给顾客（复用叫号那套 Web Push）
 import { pushToPhone } from '@/lib/webpush-server'
+// v1.1.55 清禾：充值/扣款/调整/冻结 = 直接动钱，必须店长。
+// GET 保持开放 —— 顾客端 (me / my-card / 门店主页「我的会员」) 靠它查自己卡。
+import { requireManager } from '@/lib/require-manager'
 
 export const runtime = 'nodejs'
 
@@ -51,6 +54,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ phone: string }> }
 ) {
+  const auth = requireManager(request)
+  if (!auth.ok) {
+    return Response.json({ ok: false, error: auth.error }, { status: auth.status })
+  }
   let db: any = null
   try {
     const { phone: rawPhone } = await params
