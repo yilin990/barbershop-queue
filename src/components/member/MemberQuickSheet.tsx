@@ -50,6 +50,23 @@ const PRESETS: [number, number][] = [
   [500, 50], [1000, 200], [2000, 500],
 ]
 
+// v1.1.39 服务项目：跟 BookingSection 的 ALL_SERVICES 对齐
+const SERVICES = ['剪发', '烫发', '染发', '护理', '造型', '其他']
+
+function svcChip(on: boolean) {
+  return {
+    padding: '8px 0',
+    flex: 1,
+    borderRadius: 9,
+    fontSize: 13,
+    fontWeight: 700,
+    border: on ? 'none' : '1px solid #e5e7eb',
+    background: on ? gold : '#fff',
+    color: on ? '#fff' : '#374151',
+    cursor: 'pointer',
+  }
+}
+
 const gold = '#b8860b'
 const LEVEL_COLOR: Record<string, string> = {
   normal: '#94a3b8', silver: '#8a8d98', gold: '#b8860b', diamond: '#7c3aed',
@@ -72,6 +89,10 @@ export default function MemberQuickSheet({
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const [price, setPrice] = useState('')
+  // v1.1.39 扣卡三件套：服务项目 / 备注 / 二次确认
+  const [svc, setSvc] = useState<string>(service || '')
+  const [note, setNote] = useState('')
+  const [confirm, setConfirm] = useState<null | { amount: number; useDiscount: boolean }>(null)
 
   const load = useCallback(async () => {
     const r = await fetch(
@@ -116,6 +137,55 @@ export default function MemberQuickSheet({
   return (
     <div style={S.mask} onClick={onClose}>
       <div style={S.sheet} onClick={(e) => e.stopPropagation()}>
+        {/* v1.1.39 二次确认：钱的事必须店长亲手确认一次，不点错就扣走 */}
+        {confirm && (
+          <div style={S.cMask} onClick={(e) => { e.stopPropagation(); setConfirm(null) }}>
+            <div style={S.cBox} onClick={(e) => e.stopPropagation()}>
+              <div style={S.cTitle}>确认扣款</div>
+              <div style={S.cRow}><span>顾客</span><b>{customerName}</b></div>
+              <div style={S.cRow}><span>服务</span><b>{svc || '未选'}</b></div>
+              <div style={S.cRow}><span>原价</span><b>{yuan(listPrice)}</b></div>
+              <div style={S.cRow}>
+                <span>折扣</span>
+                <b>{confirm.useDiscount && card.discount < 1 ? (card.discount * 10).toFixed(1) + ' 折' : '无'}</b>
+              </div>
+              <div style={S.cRow}><span>备注</span><b>{note || '无'}</b></div>
+              {orderNo ? <div style={S.cRow}><span>订单</span><b>{orderNo}</b></div> : null}
+              <div style={S.cDivider} />
+              <div style={S.cRowBig}>
+                <span>本次扣款</span>
+                <b style={{ color: gold }}>{yuan(confirm.amount)}</b>
+              </div>
+              <div style={S.cRow}>
+                <span>扣后余额</span>
+                <b>{yuan(Math.round((card.balanceYuan - confirm.amount) * 100) / 100)}</b>
+              </div>
+              {confirm.amount > card.balanceYuan && (
+                <div style={S.cErr}>余额不足，扣不了</div>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                <Btn label="再想想" big onClick={() => setConfirm(null)} />
+                <Btn
+                  label="确认扣款"
+                  primary
+                  big
+                  disabled={!!busy || confirm.amount <= 0 || confirm.amount > card.balanceYuan}
+                  onClick={async () => {
+                    setConfirm(null)
+                    await post('consume', {
+                      amountYuan: confirm.amount,
+                      service: svc,
+                      orderNo,
+                      note: note || undefined,
+                    })
+                    setNote('')
+                    setPrice('')
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
         <div style={S.head}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 800 }}>
@@ -193,7 +263,20 @@ export default function MemberQuickSheet({
               />
             </div>
 
-            <div style={S.secTitle}>消费扣款</div>
+            <div style={S.secTitle}>服务项目</div>
+            <div style={S.svcRow}>
+              {SERVICES.map((x) => (
+                <button
+                  key={x}
+                  onClick={() => setSvc(x)}
+                  style={svcChip(svc === x)}
+                >
+                  {x}
+                </button>
+              ))}
+            </div>
+
+            <div style={S.secTitle}>金额</div>
             <div style={S.priceRow}>
               <input
                 value={price}
@@ -210,23 +293,28 @@ export default function MemberQuickSheet({
                   : '填原价自动算折扣'}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+
+            <div style={S.secTitle}>备注（可不填）</div>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="如：加做造型 / 朋友介绍 / 客人要求"
+              style={S.noteInput}
+            />
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <Btn
                 label="从卡里扣"
                 primary
                 big
                 disabled={listPrice <= 0 || !!busy}
-                onClick={() => post('consume', {
-                  amountYuan: realPrice,
-                  service,
-                  orderNo,
-                })}
+                onClick={() => setConfirm({ amount: realPrice, useDiscount: true })}
               />
               <Btn
                 label="原价扣（不打折）"
                 big
                 disabled={listPrice <= 0 || !!busy}
-                onClick={() => post('consume', { amountYuan: listPrice, service, orderNo })}
+                onClick={() => setConfirm({ amount: listPrice, useDiscount: false })}
               />
             </div>
 
@@ -346,4 +434,59 @@ const S: any = {
     padding: '9px 12px', fontSize: 13, borderBottom: '1px solid #f9fafb',
   },
   foot: { display: 'flex', gap: 8, marginTop: 16 },
+  // v1.1.39
+  svcRow: { display: 'flex', gap: 6 },
+  noteInput: {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: 10,
+    fontSize: 14,
+    border: '1px solid #e5e7eb',
+    boxSizing: 'border-box',
+  },
+  cMask: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,.55)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px 20px',
+    zIndex: 10000,
+  },
+  cBox: {
+    width: '100%',
+    maxWidth: 360,
+    background: '#fff',
+    borderRadius: 16,
+    padding: '20px 18px',
+    boxShadow: '0 12px 40px rgba(0,0,0,.3)',
+  },
+  cTitle: { fontSize: 17, fontWeight: 800, marginBottom: 14, color: '#1f2937' },
+  cRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: 13,
+    padding: '5px 0',
+    color: '#6b7280',
+  },
+  cDivider: { height: 1, background: '#f3f4f6', margin: '10px 0' },
+  cRowBig: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: 15,
+    fontWeight: 700,
+    color: '#1f2937',
+  },
+  cErr: {
+    marginTop: 10,
+    padding: 8,
+    background: '#fee2e2',
+    color: '#991b1b',
+    borderRadius: 8,
+    fontSize: 12,
+    fontWeight: 600,
+  },
 }

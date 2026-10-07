@@ -48,6 +48,18 @@ const LEVEL_COLOR: Record<string, string> = {
 }
 const yuan = (n: number) => '¥' + Number(n || 0).toFixed(2)
 
+const STATUS_TEXT: Record<string, string> = {
+  reserved: '已预约', arrived: '已到店', serving: '服务中',
+  completed: '已完成', no_show: '未到店',
+}
+const STATUS_COLOR: Record<string, any> = {
+  reserved: { color: '#b8860b', fontSize: 12, fontWeight: 700 },
+  arrived: { color: '#2563eb', fontSize: 12, fontWeight: 700 },
+  serving: { color: '#7c3aed', fontSize: 12, fontWeight: 700 },
+  completed: { color: '#16a34a', fontSize: 12, fontWeight: 700 },
+  no_show: { color: '#9ca3af', fontSize: 12, fontWeight: 700 },
+}
+
 export default function MyCardPage() {
   return <Suspense fallback={null}><Inner /></Suspense>
 }
@@ -61,6 +73,8 @@ function Inner() {
   const [logs, setLogs] = useState<LogRow[]>([])
   const [state, setState] = useState<'idle' | 'loading' | 'none' | 'ready' | 'bad'>('idle')
   const [input, setInput] = useState(phone)
+  // v1.1.39 订单记录：预约 / 现场取号 也要能看到
+  const [orders, setOrders] = useState<any[]>([])
 
   const load = useCallback(async (p: string) => {
     if (!/^1\d{10}$/.test(p)) { setState('bad'); return }
@@ -70,7 +84,17 @@ function Inner() {
         '/api/members/' + encodeURIComponent(p) + '?merchantId=' + merchantId
       )
       const j = await r.json()
-      if (j.ok) { setCard(j.card); setLogs(j.logs || []); setState('ready') }
+      if (j.ok) {
+        setCard(j.card); setLogs(j.logs || []); setState('ready')
+        // 顺带拉订单记录（按手机号过滤）
+        fetch('/api/queues?merchantId=' + merchantId, { cache: 'no-store' })
+          .then(r => r.json())
+          .then(q => {
+            if (q.success && Array.isArray(q.queues))
+              setOrders(q.queues.filter((x: any) => x.customerPhone === p))
+          })
+          .catch(() => {})
+      }
       else { setCard(null); setState('none') }
     } catch {
       setState('none')
@@ -184,6 +208,25 @@ function Inner() {
                 </div>
               </div>
             )) : <div style={S.hint}>还没有记录</div>}
+          </div>
+
+          <div style={S.secTitle}>我的订单（{orders.length}）</div>
+          <div style={S.logs}>
+            {orders.length ? orders.map(o => (
+              <div key={o.id} style={S.logRow}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {o.orderNo} · {o.service}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>
+                    {o.type === 'ticket' ? '现场取号' : '预约'} · {o.stylistName} 老师 · {o.scheduledAt}
+                  </div>
+                </div>
+                <span style={STATUS_COLOR[o.status] || { color: '#6b7280' }}>
+                  {STATUS_TEXT[o.status] || o.status}
+                </span>
+              </div>
+            )) : <div style={S.hint}>还没有订单</div>}
           </div>
 
           <div style={{ textAlign: 'center', marginTop: 24 }}>
