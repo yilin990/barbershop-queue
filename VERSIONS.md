@@ -6,6 +6,7 @@
 
 | 版本 | Commit | 日期 |
 |------|--------|------|
+| `v1.1.36-ios-push-closed-loop` | (本次) | 2026-10-07 |
 | `v0.8.8-mcp-setup-and-ssh-keys` | `182c8b5` | 2026-08-28 |
 | `v0.8.7-github-remote-backup` | `54b8a11` | 2026-08-28 |
 | `v0.8.6-db-auto-backup` | `f1b5043` | 2026-08-28 |

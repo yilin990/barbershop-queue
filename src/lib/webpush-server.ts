@@ -2,6 +2,11 @@
  * webpush-server.ts - 服务端 Web Push (VAPID)
  * 2026-10-07 清禾 - 造型项目叫号推送
  *
+ * v1.1.36 (2026-10-07 11:45 清禾) iOS 叫号推送闭环 - 奕霖真机确认 iPhone 能收到。
+ *   tag 每次叫号唯一(同 tag 会互相替换) + APNs priority 10(否则 iOS 静默投递没声音)。
+ *   注意: web-push@3.6.7 没有 silent 选项, 传了直接抛错会打挂全部推送。
+ *   注意: iOS vibrate 自定义模式不支持, 震动只能跟系统设置。
+ *
  * 订阅按 (phone, merchantId) 绑定，不绑 queueId
  *   -> 顾客只需授权一次，之后每一张单子都能收到；刷新页面不丢
  * VAPID 密钥从 .openclaw/secrets/vapid.json 读（已 gitignore）
