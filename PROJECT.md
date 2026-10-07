@@ -12,13 +12,13 @@
 
 | 字段 | 值 |
 |------|---|
-| **项目名** | 芝林大药房 Demo（zhilin-pharmacy-official） |
-| **项目代号** | `zhilin-001` |
-| **版本号** | **v0.7.0**（2026-06-21 确定） |
-| **类型** | 多租户商户模板（基于芝林大药房·附小店） |
-| **本地路径** | `~/.openclaw/workspace/projects/zhi_lin_pharmacy/official/` |
-| **本地 URL** | `http://localhost:3000` |
-| **生产端口** | 3000 |
+| **项目名** | 造型·叫号排队 SaaS（barber-qingheos） |
+| **项目代号** | `barber-qingheos` |
+| **版本号** | **v1.1.36**（2026-10-07，代码内注释版本线为准） |
+| **类型** | 多租户商户 SaaS（叫号 + 预约 + Web Push 叫号提醒） |
+| **本地路径** | `/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/` |
+| **本地 URL** | `http://127.0.0.1:3070` |
+| **生产端口** | 3070（launchd: com.qinghe.barber-3070.watchdog）|
 | **数据库** | SQLite（Prisma） |
 
 ### 版本号规则
