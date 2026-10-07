@@ -141,10 +141,14 @@ export default function MerchantDisplayPage() {
     }
     setMemberLoading(true)
     try {
-      const res = await fetch(`/api/customer/lookup?merchantCode=G0001&phone=${memberPhone}`)
+      // v1.1.42 原来查的是 /api/customer/lookup?merchantCode=G0001
+      //   那是一套独立的老积分系统(G0001 码 + 积分 + tier)，
+      //   跟新的 MemberCard(m_barber_001 + 余额 + 等级) 毫无关系，
+      //   所以门店主页「我的会员」永远查不到数据。现在直接查真实储值卡。
+      const res = await fetch(`/api/members/${memberPhone}?merchantId=m_barber_001`)
       const data = await res.json()
-      if (!data.success) {
-        toast.error('查询失败：' + (data.error || '未知错误'))
+      if (!data.ok) {
+        setMemberData({ card: null })
         return
       }
       setMemberData(data)
@@ -746,7 +750,9 @@ export default function MerchantDisplayPage() {
           padding: 16,
           paddingTop: 'max(60px, env(safe-area-inset-top, 60px))', // ⭐ 不吸附顶部, 居中弹出
           paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))', // ⭐ 给 TabBar safe space
-          zIndex: 1000,
+          // v1.1.42 原来这里是 1000，但服务条款门是 zIndex 99999，
+          //   会员弹窗被整个压住 —— 店长点「我的会员」看着像没数据，其实是被盖住了。
+          zIndex: 100100,
           overflowY: 'auto',
         }}>
           <div onClick={(e) => e.stopPropagation()} style={{
@@ -776,7 +782,7 @@ export default function MerchantDisplayPage() {
 
             {!memberData ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                <Field label="请输入手机号查积分" required center>
+                <Field label="请输入手机号查会员卡" required center>
                   <input
                     type="tel"
                     inputMode="numeric"
@@ -813,20 +819,25 @@ export default function MerchantDisplayPage() {
                     cursor: memberLoading || memberPhone.length !== 11 ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {memberLoading ? '查询中...' : '查询会员信息'}
+                  {memberLoading ? '查询中...' : '查询会员卡'}
                 </button>
                 <p style={{
                   fontSize: 11, color: 'rgba(44, 24, 16,0.85)',
                   textAlign: 'center', marginTop: 8,
                 }}>
-                  首次预约即可成为会员，开始累积积分
+                  消费时让店长开卡，充值后余额和消费记录都能在这里看到
                 </p>
               </div>
-            ) : !memberData.isMember ? (
+            ) : !memberData.card ? (
               <div style={{ textAlign: 'center', padding: '32px 16px' }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>🎫</div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: '#2c1810' }}>
-                  {memberData.message}
+                  这个手机号还没有会员卡
+                </div>
+                <div style={{
+                  fontSize: 12, color: 'rgba(44, 24, 16,0.85)', marginTop: 8,
+                }}>
+                  到店消费时让店长开卡，充一次就能查余额和消费记录
                 </div>
                 <button
                   onClick={() => { setMemberOpen(false); setBookingOpen(true); }}
@@ -838,134 +849,16 @@ export default function MerchantDisplayPage() {
                     fontSize: 14, fontWeight: 700, cursor: 'pointer',
                   }}
                 >
-                  立即预约成为会员
+                  立即预约
                 </button>
               </div>
             ) : (
-              <div>
-                {/* 头部会员卡 */}
-                <div style={{
-                  background: 'linear-gradient(135deg, rgba(184, 134, 11,0.2) 0%, rgba(184, 134, 11,0.05) 100%)',
-                  border: '1px solid rgba(184, 134, 11,0.3)',
-                  borderRadius: 16,
-                  padding: 20, marginBottom: 16,
-                  position: 'relative', overflow: 'hidden',
-                }}>
-                  <div style={{
-                    fontSize: 12, color: 'rgba(44, 24, 16,0.9)',
-                    marginBottom: 4,
-                  }}>{memberData.merchant.name} · {memberData.tier.name}</div>
-                  <div style={{
-                    fontSize: 24, fontWeight: 700, color: '#2c1810',
-                    fontFamily: 'monospace', letterSpacing: 1,
-                    marginBottom: 16,
-                  }}>
-                    {memberData.customer.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}
-                  </div>
-                  <div style={{
-                    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.9)' }}>累计积分</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: GREEN }}>
-                        {memberData.customer.points}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.9)' }}>累计消费</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2c1810' }}>
-                        ¥{memberData.customer.totalSpent}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.9)' }}>订单数</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: '#2c1810' }}>
-                        {memberData.customer.totalOrders}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 等级进度 */}
-                {memberData.tier.nextThreshold && (
-                  <div style={{
-                    background: 'rgba(245, 234, 211,0.04)',
-                    borderRadius: 12, padding: 12, marginBottom: 16,
-                  }}>
-                    <div style={{ fontSize: 11, color: 'rgba(44, 24, 16,0.9)', marginBottom: 6 }}>
-                      距离下一等级（¥{memberData.tier.nextThreshold}）还差 ¥{(memberData.tier.nextThreshold - memberData.customer.totalSpent).toFixed(0)}
-                    </div>
-                    <div style={{
-                      width: '100%', height: 6,
-                      background: 'rgba(245, 234, 211,0.1)',
-                      borderRadius: 3, overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        width: `${Math.min(100, (memberData.customer.totalSpent / memberData.tier.nextThreshold) * 100)}%`,
-                        height: '100%',
-                        background: GREEN,
-                      }} />
-                    </div>
-                  </div>
-                )}
-
-                {/* 最近订单 */}
-                <div style={{
-                  fontSize: 13, fontWeight: 600, color: '#2c1810',
-                  marginBottom: 8,
-                }}>最近订单</div>
-                {memberData.recentOrders.length === 0 ? (
-                  <div style={{
-                    textAlign: 'center', padding: 16,
-                    color: 'rgba(44, 24, 16,0.85)', fontSize: 12,
-                  }}>暂无订单</div>
-                ) : (
-                  <div style={{
-                    background: 'rgba(245, 234, 211,0.04)',
-                    borderRadius: 12, overflow: 'hidden',
-                  }}>
-                    {memberData.recentOrders.slice(0, 5).map((o: any, i: number) => (
-                      <div key={o.id} style={{
-                        padding: 12,
-                        borderBottom: i < Math.min(4, memberData.recentOrders.length - 1)
-                          ? '1px solid rgba(245, 234, 211,0.05)' : 'none',
-                      }}>
-                        <div style={{
-                          display: 'flex', justifyContent: 'space-between',
-                          marginBottom: 4,
-                        }}>
-                          <span style={{ fontSize: 12, color: 'rgba(44, 24, 16,0.6)', fontFamily: 'monospace' }}>
-                            {o.orderNo}
-                          </span>
-                          <span style={{
-                            fontSize: 11,
-                            color: o.status === 'completed' ? GREEN : 'rgba(245, 234, 211,0.5)',
-                          }}>
-                            {o.status === 'completed' ? '已完成' : o.status}
-                          </span>
-                        </div>
-                        <div style={{
-                          display: 'flex', justifyContent: 'space-between',
-                          fontSize: 13,
-                        }}>
-                          <span style={{ color: '#2c1810' }}>¥{o.finalAmount}</span>
-                          <span style={{ color: 'rgba(44, 24, 16,0.85)', fontSize: 11 }}>
-                            {new Date(o.createdAt).toLocaleDateString('zh-CN')}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* 移动到 footer (sticky bottom) - 这里去除原 button 以免重复 */}
-
-              </div>
+              <MemberCardReal data={memberData} phone={memberPhone} />
             )}
             </div>{/* 关闭 flex:1 scroll 区 */}
             
             {/* ⭐ Sticky bottom CTA - 永远在底部固定，不管上面多高 */}
-            {memberData && memberData.isMember && (
+            {memberData && memberData.card && (
               <div style={{
                 flexShrink: 0,
                 padding: '16px 24px',
@@ -1043,3 +936,113 @@ function InfoRow({ icon, label, value }: { icon: string; label: string; value: s
 }
 
 
+
+// v1.1.42 真实会员卡展示（门店主页「我的会员」弹窗）
+function MemberCardReal({ data, phone }: { data: any; phone: string }) {
+  const c = data.card || {}
+  const logs: any[] = Array.isArray(data.logs) ? data.logs : []
+  const LV: Record<string, { label: string }> = {
+    normal: { label: '普通卡' },
+    silver: { label: '银卡' },
+    gold: { label: '金卡' },
+    diamond: { label: '钻石卡' },
+  }
+  const lv = LV[c.level] || LV.normal
+  const yuan = (n: number) => '¥' + Number(n || 0).toFixed(2)
+  const sub = 'rgba(44, 24, 16,0.85)'
+  const ink = '#2c1810'
+  const TYPE_LABEL: Record<string, string> = {
+    open: '开卡', recharge: '充值', consume: '消费',
+    adjust: '调整', frozen: '冻结', unfreeze: '解冻',
+  }
+  const nx = c.nextLevel
+  const need = Math.max(0, Number(nx?.minRechargeYuan || 0) - Number(c.rechargeYuan || 0))
+  const pct = nx?.minRechargeYuan
+    ? Math.min(100, (Number(c.rechargeYuan || 0) / Number(nx.minRechargeYuan)) * 100)
+    : 0
+  return (
+    <div>
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(184,134,11,0.2) 0%, rgba(184,134,11,0.05) 100%)',
+        border: '1px solid rgba(184,134,11,0.3)',
+        borderRadius: 16, padding: 20, marginBottom: 16,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: 'rgba(44,24,16,0.9)', fontWeight: 700 }}>
+            {lv.label} · {(Number(c.discount || 1) * 10).toFixed(1)} 折
+          </span>
+          <span style={{ fontSize: 11, color: sub }}>
+            {c.status === 'active' ? '正常' : '已冻结'}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: sub, marginBottom: 2 }}>卡内余额</div>
+        <div style={{
+          fontSize: 32, fontWeight: 800, color: ink,
+          fontFamily: 'monospace', letterSpacing: 1, marginBottom: 6,
+        }}>{yuan(c.balanceYuan)}</div>
+        <div style={{ fontSize: 11, color: sub, marginBottom: 16 }}>
+          {(c.phone || phone || '').replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 11, color: sub }}>累计充值</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: ink }}>{yuan(c.rechargeYuan)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: sub }}>累计消费</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: ink }}>{yuan(c.consumeYuan)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: sub }}>到店次数</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: ink }}>{c.visitCount || 0}</div>
+          </div>
+        </div>
+      </div>
+
+      {nx && (
+        <div style={{ background: 'rgba(245,234,211,0.04)', borderRadius: 12, padding: 12, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: sub, marginBottom: 6 }}>
+            {need > 0
+              ? '距 ' + nx.label + '（累计充值满 ' + yuan(nx.minRechargeYuan) + '）还差 ' + yuan(need)
+              : '已达 ' + nx.label}
+          </div>
+          <div style={{ width: '100%', height: 6, background: 'rgba(245,234,211,0.1)', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: pct + '%', height: '100%', background: GREEN }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 13, fontWeight: 600, color: ink, marginBottom: 8 }}>最近记录</div>
+      {logs.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 16, color: sub, fontSize: 12 }}>还没有记录</div>
+      ) : (
+        <div style={{ background: 'rgba(245,234,211,0.04)', borderRadius: 12, overflow: 'hidden' }}>
+          {logs.slice(0, 6).map((l: any, i: number) => (
+            <div key={l.id || i} style={{
+              padding: 12,
+              borderBottom: i < Math.min(5, logs.length - 1) ? '1px solid rgba(245,234,211,0.05)' : 'none',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: ink, fontWeight: 600 }}>
+                  {TYPE_LABEL[l.type] || l.type}
+                </span>
+                <span style={{
+                  fontSize: 14, fontWeight: 700, fontFamily: 'monospace',
+                  color: Number(l.changeYuan) < 0 ? '#dc2626' : GREEN,
+                }}>
+                  {Number(l.changeYuan) < 0 ? '' : '+'}{yuan(l.changeYuan)}
+                </span>
+              </div>
+              {l.note ? (
+                <div style={{ fontSize: 11, color: sub, marginTop: 3 }}>{l.note}</div>
+              ) : null}
+              <div style={{ fontSize: 10, color: sub, marginTop: 3, opacity: 0.7 }}>
+                {String(l.createdAt || '').replace('T', ' ').slice(0, 16)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

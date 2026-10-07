@@ -113,3 +113,38 @@ export async function POST(request: NextRequest) {
     return errorResponse(e)
   }
 }
+// v1.1.42 PATCH：店长改服务标准价
+//   为什么要这个：价格之前写死在 Service 表里，改一次要找我。
+//   店长自己会调价（剪发 58 → 68），这种事一天可能好几回，不能老等人。
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const id = (body.id || '').trim()
+    const merchantId = (body.merchantId || '').trim()
+    const price = Number(body.price)
+
+    if (!id) return errorResponse(new Error('id 必填'), 400)
+    if (!merchantId) return errorResponse(new Error('merchantId 必填'), 400)
+    if (!Number.isFinite(price) || price < 0 || price > 99999) {
+      return errorResponse(new Error('价格必须是 0 ~ 99999 之间的数字'), 400)
+    }
+
+    const svc = await prisma.service.findUnique({ where: { id } })
+    if (!svc) return errorResponse(new Error('服务不存在'), 404)
+    // 多租户隔离：不能改别家商户的服务
+    if (svc.merchantId !== merchantId) {
+      return errorResponse(new Error('无权修改该商户的服务'), 403)
+    }
+
+    // 保留 2 位，避免浮点误差往下累积
+    const rounded = Math.round(price * 100) / 100
+    const updated = await prisma.service.update({
+      where: { id },
+      data: { price: rounded },
+    })
+
+    return successResponse({ service: updated, updated: true })
+  } catch (e: any) {
+    return errorResponse(e)
+  }
+}

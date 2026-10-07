@@ -41,6 +41,11 @@ const PAYS: { key: string; label: string; icon: string }[] = [
 ]
 
 const gold = '#b8860b'
+
+// v1.1.42 店长自己调价的快捷金额
+const QUICK = [38, 58, 68, 88, 128, 198, 268, 380]
+
+const STD_HREF = '/merchant/pricing?merchantId=m_barber_001'
 const yuan = (n: number) => '¥' + Number(n || 0).toFixed(2)
 
 export default function SettlementSheet({
@@ -75,6 +80,9 @@ export default function SettlementSheet({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [askNext, setAskNext] = useState(false)
+  // v1.1.42 「设为标准价」的反馈
+  const [stdMsg, setStdMsg] = useState('')
+  const [stdBusy, setStdBusy] = useState(false)
 
   const load = useCallback(async () => {
     const [s, m] = await Promise.all([
@@ -102,6 +110,30 @@ export default function SettlementSheet({
   const dueYuan = useDiscount
     ? Math.round(listYuan * card!.discount * 100) / 100
     : listYuan
+
+  // v1.1.42 把这一单的价格设成标准价，以后每单自动带出
+  async function setAsStandard(s: Svc, p: number) {
+    setStdBusy(true); setStdMsg('')
+    try {
+      const r = await fetch('/api/services', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: s.id, merchantId, price: p }),
+      })
+      const j = await r.json()
+      if (!j.success) {
+        setStdMsg('没改成：' + (j.error || '保存失败'))
+        setStdBusy(false)
+        return
+      }
+      setSvcs(prev => prev.map(x => x.id === s.id ? { ...x, price: j.service.price } : x))
+      setStdMsg('「' + s.name + '」标准价已改成 ¥' + Number(j.service.price).toFixed(2))
+    } catch (e: any) {
+      setStdMsg('网络错误：' + (e?.message || ''))
+    } finally {
+      setStdBusy(false)
+    }
+  }
 
   const pickSvc = (id: string) => {
     setPick(id)
@@ -248,6 +280,50 @@ export default function SettlementSheet({
           style={S.input}
         />
 
+        {(() => {
+          const cur = Math.round((Number(price) || 0) * 100) / 100
+          const hit = svcs.find(x => x.id === pick)
+          const off = !!hit && cur !== hit.price
+          return (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>常用</span>
+                {QUICK.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => setPrice(String(q))}
+                    style={quickBtn(cur === q)}
+                  >¥{q}</button>
+                ))}
+              </div>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 8,
+                alignItems: 'center', marginTop: 8,
+              }}>
+                {off && hit && (
+                  <button
+                    onClick={() => setAsStandard(hit, cur)}
+                    disabled={stdBusy}
+                    style={stdSaveBtn(stdBusy)}
+                  >
+                    {stdBusy ? '保存中…' : '设为「' + hit.name + '」标准价'}
+                  </button>
+                )}
+                <a href={STD_HREF} style={stdLink}>
+                  管理全部标准价 ›
+                </a>
+              </div>
+              {stdMsg && (
+                <div style={{
+                  marginTop: 6, fontSize: 11, fontWeight: 600,
+                  color: stdMsg.indexOf('没改成') === 0 || stdMsg.indexOf('网络') === 0
+                    ? '#b91c1c' : '#047857',
+                }}>{stdMsg}</div>
+              )}
+            </div>
+          )
+        })()}
+
         <div style={S.sec}>备注（可不填）</div>
         <input
           value={note}
@@ -291,6 +367,26 @@ export default function SettlementSheet({
       </div>
     </div>
   )
+}
+
+function quickBtn(on: boolean) {
+  return {
+    padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+    border: on ? '1.5px solid ' + gold : '1px solid #e5e7eb',
+    background: on ? '#fffbf0' : '#fff', color: on ? gold : '#6b7280',
+    cursor: 'pointer',
+  }
+}
+function stdSaveBtn(dis: boolean) {
+  return {
+    padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+    border: 'none', background: dis ? '#d1d5db' : '#0a3a1f',
+    color: '#fff', cursor: dis ? 'not-allowed' : 'pointer',
+  }
+}
+const stdLink = {
+  fontSize: 12, fontWeight: 600, color: gold,
+  textDecoration: 'none', cursor: 'pointer',
 }
 
 function svcBtn(on: boolean) {
