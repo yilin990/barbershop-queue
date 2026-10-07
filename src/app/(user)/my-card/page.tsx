@@ -75,6 +75,8 @@ function Inner() {
   const [input, setInput] = useState(phone)
   // v1.1.39 订单记录：预约 / 现场取号 也要能看到
   const [orders, setOrders] = useState<any[]>([])
+  // v1.1.43 区块折叠：记录多的时候一屏拉不到底
+  const [open, setOpen] = useState({ logs: true, orders: false })
 
   const load = useCallback(async (p: string) => {
     if (!/^1\d{10}$/.test(p)) { setState('bad'); return }
@@ -157,8 +159,17 @@ function Inner() {
                 {(card.discount * 10).toFixed(1)} 折
               </span>
             </div>
-            <div style={{ fontSize: 12, opacity: 0.65, marginTop: 22 }}>卡内余额</div>
-            <div style={{ fontSize: 40, fontWeight: 800, color: gold, lineHeight: 1.15 }}>
+            {/* v1.1.43 原来这里 color: gold 印在金色渐变卡上 —— 同色系贴脸，
+                40px 看不清。现在白字 56px 900 字重，投影托底，一眼就抓到。 */}
+            <div style={{
+              fontSize: 12, opacity: 0.8, marginTop: 20,
+              letterSpacing: 2, fontWeight: 600,
+            }}>卡内余额</div>
+            <div style={{
+              fontSize: 56, fontWeight: 900, color: '#fff',
+              lineHeight: 1.05, marginTop: 2, letterSpacing: -1,
+              textShadow: '0 2px 14px rgba(0,0,0,.28)',
+            }}>
               {yuan(card.balanceYuan)}
             </div>
             <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>
@@ -188,8 +199,14 @@ function Inner() {
             <Stat label="到店次数" value={String(card.visitCount)} />
           </div>
 
-          <div style={S.secTitle}>消费记录</div>
-          <div style={S.logs}>
+          <FoldToggle
+            title="消费记录"
+            count={logs.length}
+            open={open.logs}
+            onToggle={() => setOpen(p => ({ ...p, logs: !p.logs }))}
+          />
+          {open.logs && (
+          <div style={S.scroll}>
             {logs.length ? logs.map(l => (
               <div key={l.id} style={S.logRow}>
                 <div style={{ flex: 1 }}>
@@ -213,9 +230,16 @@ function Inner() {
               </div>
             )) : <div style={S.hint}>还没有记录</div>}
           </div>
+          )}
 
-          <div style={S.secTitle}>我的订单（{orders.length}）</div>
-          <div style={S.logs}>
+          <FoldToggle
+            title="我的订单"
+            count={orders.length}
+            open={open.orders}
+            onToggle={() => setOpen(p => ({ ...p, orders: !p.orders }))}
+          />
+          {open.orders && (
+          <div style={S.scroll}>
             {orders.length ? orders.map(o => (
               <div key={o.id} style={S.logRow}>
                 <div style={{ flex: 1 }}>
@@ -232,6 +256,7 @@ function Inner() {
               </div>
             )) : <div style={S.hint}>还没有订单</div>}
           </div>
+          )}
 
           <div style={{ textAlign: 'center', marginTop: 24 }}>
             <button style={S.again} onClick={() => { setState('idle'); setCard(null) }}>
@@ -283,6 +308,36 @@ const S: any = {
   },
   secTitle: { fontSize: 13, fontWeight: 700, color: '#374151', margin: '18px 0 8px' },
   logs: { background: '#fff', borderRadius: 14, border: '1px solid #f0e6d2', overflow: 'hidden' },
+  // v1.1.43 卡片内滑动：记录多的时候别把页面撑到拉不到底
+  scroll: {
+    background: '#fff', borderRadius: 14, border: '1px solid #f0e6d2',
+    marginTop: 8, maxHeight: 300, overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch' as const, overscrollBehavior: 'contain',
+  },
   logRow: { display: 'flex', alignItems: 'center', padding: '11px 14px', borderBottom: '1px solid #f9fafb', fontSize: 13 },
   again: { background: 'none', border: '1px solid #e5e7eb', borderRadius: 10, padding: '9px 18px', color: '#6b7280', fontSize: 13 },
+}
+
+// v1.1.43 可折叠区块：记录一多就拉不到底，余额反而被挤到看不见
+function FoldToggle({ title, count, open, onToggle }: {
+  title: string; count: number; open: boolean; onToggle: () => void
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        width: '100%', marginTop: 18, padding: '13px 15px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+        fontSize: 14, fontWeight: 800, color: '#1f2937', cursor: 'pointer',
+      }}
+    >
+      <span>{title}<span style={{ color: '#9ca3af', fontWeight: 700 }}>（{count}）</span></span>
+      <span style={{
+        display: 'inline-block',
+        transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform .2s', color: '#9ca3af', fontSize: 11,
+      }}>▼</span>
+    </button>
+  )
 }
