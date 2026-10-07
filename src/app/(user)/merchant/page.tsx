@@ -231,6 +231,27 @@ export default function MerchantDisplayPage() {
         >
           🎫 我的会员 / 查积分
         </div>
+        {/* v1.1.56 清禾：会员卡管理面板入口。
+            /merchant/members 页面 313 行早就建好了，但界面上没有任何地方跳它，
+            店长只能手动敲网址。名字刻意跟上面「我的会员」区分开，避免点错。 */}
+        <a
+          href="/merchant/members"
+          style={{
+            display: 'inline-block',
+            marginTop: 10,
+            marginLeft: 8,
+            padding: '6px 14px',
+            background: 'rgba(184, 134, 11, 0.14)',
+            border: `1px solid rgba(${GREEN_RGBA}, 0.55)`,
+            borderRadius: 100,
+            fontSize: 12, color: GREEN, fontWeight: 700,
+            cursor: 'pointer',
+            userSelect: 'none',
+            textDecoration: 'none',
+          }}
+        >
+          💼 会员卡管理
+        </a>
       </div>
 
       {/* ============ 快捷操作 ============ */}
