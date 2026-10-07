@@ -207,6 +207,20 @@ export default function OrderCard({ data, onChanged }: OrderCardProps) {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {/* v1.1.45 奕霖立：预约卡金额提到头部 —— 折叠态也要一眼看见 */}
+          {isBookingType && data.finalAmount > 0 && (
+            <span style={{
+              padding: '3px 10px',
+              borderRadius: 8,
+              background: 'rgba(185, 28, 28, 0.08)',
+              border: '1px solid rgba(185, 28, 28, 0.25)',
+              fontSize: '15px', fontWeight: 800,
+              color: '#b91c1c',
+              whiteSpace: 'nowrap',
+            }}>
+              ¥{data.finalAmount.toFixed(2)}
+            </span>
+          )}
           <div style={{
             padding: '4px 12px',
             borderRadius: '12px',
