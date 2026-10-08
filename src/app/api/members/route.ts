@@ -17,7 +17,7 @@ import { requireManager } from '@/lib/require-manager'
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
-  const auth = requireManager(request)
+  const auth = await requireManager(request)   // v1.1.58：读 DB 实时 role，已改 async
   if (!auth.ok) {
     return Response.json({ ok: false, error: auth.error }, { status: auth.status })
   }
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireManager(request)
+  const auth = await requireManager(request)   // v1.1.58
   if (!auth.ok) {
     return Response.json({ ok: false, error: auth.error }, { status: auth.status })
   }

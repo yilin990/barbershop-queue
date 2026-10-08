@@ -54,7 +54,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ phone: string }> }
 ) {
-  const auth = requireManager(request)
+  const auth = await requireManager(request)   // v1.1.58：读 DB 实时 role，已改 async
   if (!auth.ok) {
     return Response.json({ ok: false, error: auth.error }, { status: auth.status })
   }

@@ -17,6 +17,7 @@
 import { NextRequest } from 'next/server'
 import { extractToken, verifyToken, JwtPayload } from './jwt'
 import { parseCookie } from './cookie'
+import { prisma } from './db'
 
 /** 允许操作会员/储值的角色。库里实际取值：店长 / 普通 / VIP / 金卡 / chronic */
 const MANAGER_ROLES = ['店长']
@@ -50,13 +51,30 @@ export function requireLogin(request: NextRequest): AuthResult {
   return { ok: true, payload }
 }
 
-/** 要求店长角色 —— 用于改钱（充值/扣款/调整/冻结/开卡）与读全部会员 */
-export function requireManager(request: NextRequest): AuthResult {
+/** 要求店长角色 —— 用于改钱（充值/扣款/调整/冻结/开卡）与读全部会员。
+ *
+ * ⭐ v1.1.58 2026-10-08 奕霖截图反馈「需要店长权限」后改：
+ *   原来只信 JWT 里的 role 快照。JWT 有效期 30 天，role 是签发那一刻写进去的，
+ *   所以「角色后来升了但旧 token 还在用」会一直 403 ——
+ *   奕霖自己的账号 DB 里明明是「店长」，却在自己面板上被拦。
+ *   现在改成以 DB 实时 role 为准：改角色立刻生效，不用等 token 过期或重新登录。
+ */
+export async function requireManager(request: NextRequest): Promise<AuthResult> {
   const r = requireLogin(request)
   if (!r.ok) return r
-  const role = String(r.payload?.role || '').trim()
+
+  const userId = String(r.payload?.userId || '').trim()
+  if (!userId) return { ok: false, error: '登录已过期，请重新登录', status: 401 }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true },
+  })
+  if (!user) return { ok: false, error: '用户不存在，请重新登录', status: 401 }
+
+  const role = String(user.role || '').trim()
   if (!MANAGER_ROLES.includes(role)) {
     return { ok: false, error: '需要店长权限', status: 403 }
   }
-  return r
+  return { ok: true, payload: { ...(r.payload as JwtPayload), role: user.role } }
 }
