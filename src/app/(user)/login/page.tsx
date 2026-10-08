@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUserStore } from '@/stores/userStore'
+import ManagerAccessBox from '@/components/ManagerAccessBox'
 
 export default function LoginPage() {
   const [step, setStep] = useState<'phone' | 'code'>('phone')
@@ -388,6 +389,8 @@ const isDev =
               </div>
             </div>
           )}
+
+          <ManagerAccessBox />
 
           <p style={{
             textAlign: 'center', fontSize: '11px',
