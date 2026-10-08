@@ -65,10 +65,14 @@ export function PinUnlockModal({ t, onClose, onSuccess, expectedPin, title = '�
     setError('')
     // ⭐ 2026-10-01 20:48 奕霖拍板回退：3 个默认 PIN 直比对 + 已存的 custom PIN
     const isDefault = DEFAULT_PINS.includes(v)
+    // ⭐ 2026-10-08 16:28 清禾：服务端校验必须先跑，不能被 || 短路。
+    // 否则默认 PIN（8888/6666/1314）会直接短路掉 verifyPin，token 拿不到，
+    // 表现就是「店长模式开了但会员面板还是进不去」—— 正是奕霖要解决的问题。
+    const serverOk = await verifyPin(v)
     const ok =
       isDefault ||
       (expectedPin ? v === expectedPin : false) ||
-      await verifyPin(v)
+      serverOk
     if (ok) {
       clearErrors()
       setLastAuthTime()

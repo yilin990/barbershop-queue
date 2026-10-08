@@ -66,13 +66,62 @@ export async function savePin(pin: string, lockDuration: LockDuration): Promise<
   setLastAuthTime()
 }
 
+/** 服务端校验结果 */
+export interface ServerPinResult {
+  ok: boolean
+  /** 服务端还没登记这个 PIN，需要先走一次 set */
+  needSetup?: boolean
+  error?: string
+}
+
+/**
+ * 向服务端验证 PIN 并换店长 token。
+ *
+ * ⭐ 奕霖 2026-10-08 16:28 定的需求：
+ *   「进入了店长模式后，再进入这个页面，就能直接访问到会员面板」
+ *   —— 也就是说，解锁店长模式这一步就该把身份换到手，
+ *   会员面板不该再问第二次。v1.1.61 那个内嵌登录框正是他嫌烦的二次门槛。
+ */
+export async function syncManagerToken(pin: string): Promise<ServerPinResult> {
+  if (typeof window === 'undefined') return { ok: false }
+  try {
+    const res = await fetch('/api/auth/manager-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'verify', pin }),
+    })
+    const j = await res.json()
+    if (j.success) return { ok: true }
+    const msg = String(j.error || '')
+    if (msg.indexOf('还没登记') !== -1) return { ok: false, needSetup: true, error: msg }
+    return { ok: false, error: msg }
+  } catch {
+    return { ok: false, error: '网络错误' }
+  }
+}
+
+/**
+ * 校验 PIN。
+ *
+ * 本地 hash 仍然照旧校验（防误触、离线可用），
+ * 但无论本地有没有 PIN，都会同时问一次服务端 ——
+ * 因为换设备时本地根本没有 PIN，靠服务端才能用同一个 PIN 解锁；
+ * 服务端通过后会下发 30 天 zhilin-token，后续需要店长权限的页面直接放行。
+ */
 export async function verifyPin(pin: string): Promise<boolean> {
   if (typeof window === 'undefined') return false
   const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) return false
-  const stored: StoredPin = JSON.parse(raw)
-  const hash = await hashPin(pin, stored.salt)
-  return hash === stored.hash
+  let localOk = false
+  if (raw) {
+    try {
+      const stored: StoredPin = JSON.parse(raw)
+      localOk = (await hashPin(pin, stored.salt)) === stored.hash
+    } catch {
+      localOk = false
+    }
+  }
+  const server = await syncManagerToken(pin)
+  return localOk || server.ok
 }
 
 export function getLockDuration(): LockDuration {

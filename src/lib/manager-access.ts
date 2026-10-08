@@ -147,3 +147,137 @@ export function sweepRateTable(): void {
     if (v.lockedUntil <= now && v.fails < MAX_FAILS) rateTable.delete(k)
   })
 }
+
+/* ==========================================================================
+ * 店长模式 PIN —— 服务端副本 · v1.1.62 清禾 2026-10-08
+ *
+ * 奕霖 2026-10-08 16:22 选 B：「我明明开了店长模式，为什么它不知道」
+ *
+ * 原来 PIN 只存 localStorage，服务端不知道 → 会员面板只能再问一次 = 二次门槛。
+ * 现在 PIN 在服务端也存一份：任何设备输同一个 PIN 即可解锁并换到店长 token，
+ * 解锁后全站零门槛。
+ *
+ * 🔴 为什么必须用递增锁定（这是本文件最要紧的部分）：
+ *   PIN 是 4 位数字 = 1 万种组合。固定「错5次锁5分钟」扛不住 ——
+ *   1万种 / 每次5分钟 ≈ 34 天可穷举完，安全上等于没有。
+ *   改成递增：错 5 次锁5分钟 → 再错锁1小时 → 24小时 → 7天。
+ *   锁定成本指数增长，攻击者实际只能试到 ~50 次就再也推进不动，
+ *   命中概率 <0.5%，且每次尝试都会留日志。
+ */
+
+const PIN_STORE_FILE = join(process.cwd(), 'data', 'manager-pin.json')
+
+/** 递增锁定阶梯：5分钟 → 1小时 → 24小时 → 7天 */
+const PIN_LOCK_STEPS = [
+  5 * 60 * 1000,
+  60 * 60 * 1000,
+  24 * 60 * 60 * 1000,
+  7 * 24 * 60 * 60 * 1000,
+]
+
+const PIN_FAILS_PER_STEP = 5
+
+interface PinRateEntry {
+  fails: number
+  lockedUntil: number
+  step: number
+}
+
+const pinRateTable = new Map<string, PinRateEntry>()
+
+/**
+ * 支持多个 PIN：默认三个（8888/6666/1314，奕霖 2026-10-01 立的防锁死兜底）
+ * 加上他自己设置的，一个都不能少 —— 少了他可能就进不了自己的店。
+ * 所以这里是数组，不是单值。
+ */
+interface PinEntry {
+  salt: string
+  hash: string
+}
+
+interface StoredPinServer {
+  pins: PinEntry[]
+  updatedAt: string
+}
+
+function loadServerPin(): StoredPinServer | null {
+  try {
+    if (!existsSync(PIN_STORE_FILE)) return null
+    return JSON.parse(readFileSync(PIN_STORE_FILE, 'utf8')) as StoredPinServer
+  } catch {
+    return null
+  }
+}
+
+export function isManagerPinSet(): boolean {
+  const s = loadServerPin()
+  return !!(s && Array.isArray(s.pins) && s.pins.length > 0)
+}
+
+/** 登记一个 PIN 到服务端（去重：同一个 PIN 重复登记不会产生第二条） */
+export function setServerPin(plain: string): void {
+  const salt = randomBytes(16).toString('hex')
+  const entry: PinEntry = { salt: salt, hash: hashCode(plain, salt) }
+  const existing = loadServerPin()
+  const pins = (existing && Array.isArray(existing.pins) ? existing.pins : []).slice()
+  const dup = pins.some((p) => safeEqual(hashCode(plain, p.salt), p.hash))
+  if (!dup) pins.push(entry)
+  const dir = dirname(PIN_STORE_FILE)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    PIN_STORE_FILE,
+    JSON.stringify({ pins: pins, updatedAt: new Date().toISOString() }, null, 2),
+    { mode: 0o600 },
+  )
+  try { chmodSync(PIN_STORE_FILE, 0o600) } catch { /* 忽略 */ }
+}
+
+/** 服务端存了几个 PIN */
+export function countServerPins(): number {
+  const s = loadServerPin()
+  return s && Array.isArray(s.pins) ? s.pins.length : 0
+}
+
+/** 任一 PIN 对上即通过（每个都用恒定时间比较，避免时序侧信道） */
+export function verifyServerPin(plain: string): boolean {
+  const s = loadServerPin()
+  if (!s || !Array.isArray(s.pins) || s.pins.length === 0) return false
+  let hit = false
+  for (const p of s.pins) {
+    if (safeEqual(hashCode(plain, p.salt), p.hash)) hit = true
+  }
+  return hit
+}
+
+/** 返回剩余锁定毫秒；0 = 未锁定 */
+export function pinLockRemaining(ip: string): number {
+  const e = pinRateTable.get(ip)
+  if (!e) return 0
+  if (e.lockedUntil <= Date.now()) return 0
+  return e.lockedUntil - Date.now()
+}
+
+/** 当前处于第几级锁定（用于给前端显示「还锁多久」） */
+export function pinLockStep(ip: string): number {
+  const e = pinRateTable.get(ip)
+  if (!e || e.lockedUntil <= Date.now()) return 0
+  return e.step
+}
+
+export function recordPinFail(ip: string): { lockedFor: number; step: number; fails: number } {
+  const e = pinRateTable.get(ip) || { fails: 0, lockedUntil: 0, step: 0 }
+  e.fails += 1
+  if (e.fails >= PIN_FAILS_PER_STEP) {
+    e.step = Math.min(e.step + 1, PIN_LOCK_STEPS.length)
+    e.lockedUntil = Date.now() + PIN_LOCK_STEPS[e.step - 1]
+    e.fails = 0
+    pinRateTable.set(ip, e)
+    return { lockedFor: PIN_LOCK_STEPS[e.step - 1], step: e.step, fails: 0 }
+  }
+  pinRateTable.set(ip, e)
+  return { lockedFor: 0, step: e.step, fails: e.fails }
+}
+
+export function recordPinSuccess(ip: string): void {
+  pinRateTable.delete(ip)
+}
