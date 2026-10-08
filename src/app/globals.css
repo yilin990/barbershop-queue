@@ -335,3 +335,202 @@ input, textarea, select {
   color: #b8860b !important;
   font-size: 16px !important;
 }
+
+/* ==========================================================================
+   ⭐ v1.1.59 奕霖 2026-10-08 11:25：全站响应式适配层
+   --------------------------------------------------------------------------
+   背景：整套 UI 是照着 ~440px 宽屏一像素一像素写死的。
+   扫描结果：globals.css 只有 2 个 @media（display-mode / reduced-motion），
+   **宽度断点一个都没有**；组件里全是内联硬编码 px，BookingSection 里 minWidth
+   出现 30+ 次（最大 200px），窄屏 flex 容器必然溢出。
+
+   为什么加 CSS 而不是改内联样式：内联样式几百处、跨 20+ 文件，
+   逐个改风险高且容易漏。CSS 这层是安全网 —— 改一处，覆盖全站，
+   且可用 !important 精确压制那几个真正的溢出源。
+
+   覆盖机型：iPhone SE(375) / iPhone 12 mini(375) / 安卓小屏(360) /
+   极窄(320) / iPad / 桌面宽屏
+   ========================================================================== */
+
+/* ---------- 1. 基础防溢出（全宽度生效） ---------- */
+
+html {
+  /* 页面级横向滚动兜底：任何子元素溢出都不让整页左右晃 */
+  overflow-x: hidden;
+  /* iOS 横竖屏切换时锁定，避免布局闪一下 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+  /* 长串数字/英文（如手机号、订单号）不撑破容器 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 所有按钮/输入框不许被内容撑破 —— 这是窄屏最常见的破相原因 */
+button,
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 固定宽度元素（QRCodeCard 的 width:240 等）在窄屏收缩而不是溢出 */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---------- 2. Flex 溢出根治 ---------- */
+/*
+   flex 子项默认 min-width:auto，会被内容（长中文/数字）撑到不收缩，
+   这是 flex 布局横向溢出的头号原因。统一归零。
+*/
+#booking-section *,
+[class*="booking"] *,
+#booking-section div,
+#booking-section span {
+  min-width: 0;
+}
+
+/* flex 容器本身不许被撑破 */
+#booking-section {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* ---------- 3. 窄屏断点 ---------- */
+
+/* --- ≤ 430px：主流小屏（iPhone 14/15/SE2/13mini 等） --- */
+@media (max-width: 430px) {
+  body {
+    font-size: 15px;
+  }
+
+  /* 全站通用内边距收敛：原 16px 在窄屏吃掉太多可用宽度 */
+  #booking-section [style*="padding: 16px"] {
+    padding: 12px !important;
+  }
+  #booking-section [style*="padding: 14px"] {
+    padding: 11px !important;
+  }
+  #booking-section [style*="padding: 20px"] {
+    padding: 14px !important;
+  }
+
+  /* grid 间距收敛：2 列各 12px gap 在 320px 屏上占 24px */
+  #booking-section [style*="gap: 12px"] {
+    gap: 8px !important;
+  }
+  #booking-section [style*="gap: 16px"] {
+    gap: 10px !important;
+  }
+
+  /* 标题别太大，4 个中文字在 320px 上换行很难看 */
+  #booking-section h1 {
+    font-size: 20px !important;
+  }
+  #booking-section h2 {
+    font-size: 17px !important;
+  }
+  #booking-section h3 {
+    font-size: 15px !important;
+  }
+
+  /* 按钮网格：窄屏改单列，避免每个按钮被压到放不下两个字 */
+  #booking-section [style*="gridTemplateColumns: repeat(2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* --- ≤ 375px：iPhone SE / mini / 安卓常见最小宽度 --- */
+@media (max-width: 375px) {
+  body {
+    font-size: 14px;
+  }
+
+  /* 大间距全部降级 */
+  #booking-section [style*="padding: 16px"] {
+    padding: 10px !important;
+  }
+  #booking-section [style*="gap: 12px"] {
+    gap: 6px !important;
+  }
+
+  /* 按钮区内边距：原 18px 在 320px 屏上两个字都放不下 */
+  #booking-section button {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  /* 固定 min-width 的 flex 子项彻底放开 */
+  #booking-section [style*="min-width: 200px"],
+  #booking-section [style*="min-width: 180px"],
+  #booking-section [style*="min-width: 160px"],
+  #booking-section [style*="min-width: 120px"],
+  #booking-section [style*="min-width: 100px"] {
+    min-width: 0 !important;
+  }
+}
+
+/* --- ≤ 340px：极窄屏 / 老设备 / 分屏模式 --- */
+@media (max-width: 340px) {
+  body {
+    font-size: 13.5px;
+  }
+
+  #booking-section [style*="padding: 16px"],
+  #booking-section [style*="padding: 14px"],
+  #booking-section [style*="padding: 12px"] {
+    padding: 8px !important;
+  }
+
+  #booking-section [style*="gap: 12px"],
+  #booking-section [style*="gap: 10px"],
+  #booking-section [style*="gap: 8px"] {
+    gap: 5px !important;
+  }
+
+  #booking-section h1 {
+    font-size: 18px !important;
+  }
+  #booking-section h2 {
+    font-size: 15px !important;
+  }
+}
+
+/* ---------- 4. 宽屏优化：平板/桌面别拉得太散 ---------- */
+@media (min-width: 768px) {
+  #booking-section {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+}
+
+/* ---------- 5. 横屏矮屏（iPhone 横放 / 分屏） ---------- */
+@media (max-height: 500px) and (orientation: landscape) {
+  #booking-section [style*="position: fixed"][style*="bottom"] {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+}
+
+/* ---------- 6. 尊重系统「减少动态效果」 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
