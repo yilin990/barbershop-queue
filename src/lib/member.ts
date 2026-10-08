@@ -18,14 +18,13 @@
  */
 
 import Database from 'better-sqlite3'
+import { resolveDbPath } from './db-path'
 
 // ⭐ v1.1.37 (2026-10-07 清禾)：绝对路径兜底 + 环境变量可覆盖。
 // 绝对路径是因为 standalone 进程的 cwd 是 .next/standalone/...，相对路径会指向错的 db
 // 文件（跟 /api/queues 同一个坑）。但绝对路径让 3071 暂存测试没法指向副本，
 // 所以留 MEMBER_DB_PATH 出口：暂存验证时打副本，绝不碰生产库。
-export const DB_PATH =
-  process.env.MEMBER_DB_PATH ||
-  '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/prisma/dev.db'
+export const DB_PATH = resolveDbPath()
 
 export function getDb() {
   return new Database(DB_PATH)

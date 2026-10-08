@@ -30,9 +30,10 @@ function syncBarberQueueCancel(orderId: string) {
   }
 }
 
-const DB_PATH = '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/prisma/dev.db'
+const DB_PATH = resolveDbPath()
 
 import Database from 'better-sqlite3'
+import { resolveDbPath } from '../../../../lib/db-path'
 
 export const runtime = 'nodejs'
 

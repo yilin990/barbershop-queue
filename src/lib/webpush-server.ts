@@ -17,7 +17,9 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
 
-const ROOT = '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19'
+import { projectRoot } from './db-path'
+
+const ROOT = projectRoot()
 const DB_PATH = path.join(ROOT, 'prisma/dev.db')
 const VAPID_PATH = path.join(ROOT, '.openclaw/secrets/vapid.json')
 

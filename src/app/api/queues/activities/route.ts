@@ -20,11 +20,12 @@
 import { NextRequest } from 'next/server'
 import Database from 'better-sqlite3'
 import { errorResponse, successResponse } from '@/lib/error'
+import { resolveDbPath } from '../../../../lib/db-path'
 
 export const runtime = 'nodejs'
 
 // ⭐ v1.1.2 改绝对路径（standalone cwd 不可靠）
-const DB_PATH = '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/prisma/dev.db'
+const DB_PATH = resolveDbPath()
 
 function getDb() {
   return new Database(DB_PATH)

@@ -18,10 +18,11 @@ import { errorResponse, successResponse } from '@/lib/error'
 import { verifyAdminPin } from '@/lib/admin-auth'
 import Database from 'better-sqlite3'
 import path from 'path'
+import { resolveDbPath } from '../../../../lib/db-path'
 
 export const runtime = 'nodejs'
 
-const DB_PATH = '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/prisma/dev.db' // ⭐ v1.1.3 改绝对路径（standalone cwd bug）
+const DB_PATH = resolveDbPath() // ⭐ v1.1.3 改绝对路径（standalone cwd bug）
 
 function getDb() {
   return new Database(DB_PATH)

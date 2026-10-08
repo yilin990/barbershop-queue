@@ -10,15 +10,10 @@
  */
 
 import Database from 'better-sqlite3'
-import fs from 'fs'
-import path from 'path'
-
-const ABS_DB_PATH =
-  '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/prisma/dev.db'
+import { resolveDbPath } from './db-path'
 
 export function getQueueDbPath(): string {
-  if (fs.existsSync(ABS_DB_PATH)) return ABS_DB_PATH
-  return path.join(process.cwd(), 'prisma', 'dev.db')
+  return resolveDbPath()
 }
 
 export function getQueueDb(): Database.Database {

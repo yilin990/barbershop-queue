@@ -20,10 +20,11 @@ import { errorResponse, successResponse } from '@/lib/error'
 import { generatePickupCode } from '@/lib/pickup-code'
 import Database from 'better-sqlite3'
 import path from 'path'
+import { resolveDbPath } from '../../../lib/db-path'
 
 export const runtime = 'nodejs'
 
-const DB_PATH = '/Users/yilinzhao/Projects/barber-qingheos-2026-09-19/prisma/dev.db' // ⭐ v1.1.2 改绝对路径（standalone 进程的 cwd 是 .next/standalone/.../，相对路径会指向错的 db 文件）
+const DB_PATH = resolveDbPath() // ⭐ v1.1.2 改绝对路径（standalone 进程的 cwd 是 .next/standalone/.../，相对路径会指向错的 db 文件）
 
 function getDb() {
   return new Database(DB_PATH)
