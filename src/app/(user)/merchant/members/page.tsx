@@ -12,6 +12,7 @@
  *    服务端强制过 MemberCardLog。前端不给「编辑余额」入口。
  */
 
+import ManagerAccessBox from '@/components/ManagerAccessBox'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { DEFAULT_MERCHANT_ID, resolveMerchantIdFromQuery } from '@/lib/merchant'
@@ -149,6 +150,15 @@ function Inner() {
       </div>
 
       {err && <div style={S.err}>{err}</div>}
+
+      {/*
+       * 未登录/不是店长时，原地给登录入口。
+       * 之前只显示一句红字「需要店长权限」，把店长引到死胡同 ——
+       * 奕霖 2026-10-08 16:10 换设备实测撞的就是这个。
+       */}
+      {(err.includes('店长权限') || err.includes('请先登录') || err.includes('登录已过期')) && (
+        <ManagerAccessBox autoOpen redirectTo="/merchant/members" onSuccess={() => load()} />
+      )}
       {loading && <div style={S.hint}>加载中…</div>}
       {!loading && !err && !filtered.length && (
         <div style={S.hint}>还没有会员卡<br /><span style={{ fontSize: 12 }}>点右上角「+ 开卡」</span></div>

@@ -30,8 +30,17 @@ function returnTo(): string {
 
 const GOLD = '#b8860b'
 
-export default function ManagerAccessBox() {
-  const [open, setOpen] = useState(false)
+interface Props {
+  /** 登录成功后跳哪；不传就读 URL 上的 ?redirect= */
+  redirectTo?: string
+  /** 登录成功后回调。用于「原地登录原地刷新」，省掉跳页 */
+  onSuccess?: () => void
+  /** 默认就展开（用于页面里直接给登录框） */
+  autoOpen?: boolean
+}
+
+export default function ManagerAccessBox({ redirectTo, onSuccess, autoOpen }: Props = {}) {
+  const [open, setOpen] = useState(!!autoOpen)
   const [phone, setPhone] = useState('')
   const [accessCode, setAccessCode] = useState('')
   const [error, setError] = useState('')
@@ -66,8 +75,13 @@ export default function ManagerAccessBox() {
         },
         data.token,
       )
-      router.push(returnTo())
-      router.refresh()
+      if (onSuccess) {
+        onSuccess()
+        router.refresh()
+      } else {
+        router.push(redirectTo || returnTo())
+        router.refresh()
+      }
     } catch {
       setError('网络错误，请重试')
     } finally {
