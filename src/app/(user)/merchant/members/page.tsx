@@ -282,7 +282,17 @@ function Act({ label, onClick, primary }: any) {
 
 const gold = '#b8860b'
 const S: any = {
-  page: { minHeight: '100vh', background: '#faf6f0', paddingBottom: 60 },
+  // ⭐ 2026-10-08 16:38 奕霖截图反馈：会员页在浏览器里是满屏铺开的，
+  // 和主题其它页面（排队页等居中窄栏）对不齐，看着像另一个站。
+  // 排队页 BookingSection 用的是 maxWidth:440，就按这个来。
+  // S.mask 是 position:fixed，弹层不会被这个容器框住；
+  // 底部导航来自 layout，不在本文件，也不受影响。
+  // 窄屏（<440）时 maxWidth 不生效，行为跟以前完全一样。
+  page: {
+    minHeight: '100vh', background: '#faf6f0', paddingBottom: 60,
+    width: '100%', maxWidth: 440, margin: '0 auto',
+    boxShadow: '0 0 48px rgba(184,134,11,.10)',
+  },
   bar: {
     display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
     background: 'linear-gradient(180deg,#faf6f0,#fffaf0)',
