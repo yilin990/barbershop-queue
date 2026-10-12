@@ -2,8 +2,8 @@
  * 商户后台 PIN 验证（奕霖 2026-07-08 22:27）
  *
  * 跟店员 PIN 分离：
- * - 店员 PIN（staffPins） → 核销取货码
- * - 商户后台 PIN（adminPins） → 进 /admin 管理
+ * - 店员 PIN（staffPinHashes，比对哈希） → 核销取货码
+ * - 商户后台 PIN（adminPinHashes，比对哈希） → 进 /admin 管理
  *
  * 设计：
  * - 预设 3-4 个老板/店长 PIN（在 config 里）
@@ -18,9 +18,12 @@
  */
 
 import { BUSINESS_CONFIG } from '@/config/business.config'
+import { verifyPinHashes } from './pin-hash'
 
 // 从 config 读（生产环境可改 .env.local）
-const ADMIN_PINS: string[] = (BUSINESS_CONFIG as any).adminPins || ['8888', '6666', '1314']
+// ⭐ 2026-10-12：明文 PIN 已移除（原值会被打进 .next/static 前端包）
+const ADMIN_PIN_HASHES: readonly string[] = (BUSINESS_CONFIG as any).adminPinHashes || []
+const PIN_PEPPER: string = (BUSINESS_CONFIG as any).pinPepper || ''
 
 const STORAGE_KEY = 'zhilin-admin-auth'
 const SESSION_TTL_MS = 60 * 60 * 1000 // 1 小时
@@ -32,7 +35,7 @@ interface AdminSession {
 }
 
 export function verifyAdminPin(pin: string): boolean {
-  return ADMIN_PINS.includes(pin.trim())
+  return verifyPinHashes(pin, ADMIN_PIN_HASHES, PIN_PEPPER)
 }
 
 export function setAdminSession(pin: string): void {
@@ -74,7 +77,7 @@ export function isAdminAuthed(): boolean {
     const raw = decodeURIComponent(m[1])
     if (raw.startsWith('pin-')) {
       const pin = raw.slice(4)
-      if (ADMIN_PINS.includes(pin)) return true
+      if (verifyPinHashes(pin, ADMIN_PIN_HASHES, PIN_PEPPER)) return true
     }
   }
   return false

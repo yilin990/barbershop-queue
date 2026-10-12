@@ -86,12 +86,24 @@ export const BUSINESS_CONFIG = {
   // 店员 PIN 码（0-1 阶段：商户老板给员工分配）
   // 2026-07-04 00:38 奕霖需求：核销页只给"几个商户的工作人员"用
   // 后续可升级为 DB 存 staff 表 + 密码哈希
-  staffPins: ['1234', '5678', '9012', '2468'],
+  // ⭐ 2026-10-12 奕霖：PIN 不得明文出现（原明文被打进 .next/static 前端包，任何顾客可见）
+  // pepper 只用于混入哈希，校验走 verifyPinHashes()；服务端权威校验见 lib/staff-credential.ts
+  pinPepper: 'linghang-lh-2026-pin-v1',
+  staffPinHashes: [
+    'c18fe89c66cdc81e103e521d8046518b8bc2e23d3f2f00150a751fb19c085df6',
+    '1c7993f3d93576e7ea9fb71d773eb67f1c20244bf9ab9aee44b5065155bb0818',
+    'ae537866cfaf0a62785259627ce8bc893cccfe6c8e6985163562f6649aca8f3f',
+    '3873c969155f03f92064aeac346318e2481c37e341fe7db421b844de2db4ee52',
+  ],
 
   // 商户后台安全码（奕霖 2026-07-08 22:27 需求）
   // 不跟店员 PIN 混：店员管"做"（核销），老板管"管"（反馈处置 + 数据）
   // 安全码只有老板/店长知道，不写在任何公开文档
-  adminPins: ['8888', '6666', '1314'],
+  adminPinHashes: [
+    '0378c370eba89e32f1983b048a95f1bc859b6312805a7e5e7733328d28050714',
+    '2efd4c738f8e315bc4f44871d3574fd928d8c1089a62b49e4620950e8b2652cf',
+    '79dac51451dc5cea76ff1306cd37abd8ad8f729e02a7d3bf5522b64885a419b7',
+  ],
 } as const
 
 // 类型导出

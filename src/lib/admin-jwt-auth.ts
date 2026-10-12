@@ -16,10 +16,11 @@
  */
 
 import type { NextRequest } from 'next/server'
-import { BUSINESS_CONFIG } from '@/config/business.config'
+import { verifyCredentialPin } from './staff-credential'
 import { verifyToken } from './jwt'
 
-const ADMIN_PINS: string[] = (BUSINESS_CONFIG as any).adminPins || ['8888', '6666', '1314']
+// ⭐ 2026-10-12：服务端鉴权改为查数据库（scrypt 哈希，方案 B）
+// 明文 PIN 已从 config 移除；本文件仅被 src/app/api/**/route.ts 引用，确认为纯服务端
 
 export type AdminAuthResult =
   | { ok: true; via: 'pin' | 'jwt'; pin?: string; payload?: Record<string, any> }
@@ -56,7 +57,7 @@ export function verifyAdminRequest(req: NextRequest): AdminAuthResult {
     if (tokenCookie.startsWith('pin-')) {
       // legacy PIN 模式
       const pin = tokenCookie.slice(4)
-      if (ADMIN_PINS.includes(pin)) return { ok: true, via: 'pin', pin }
+      if (verifyCredentialPin('admin', pin)) return { ok: true, via: 'pin', pin }
       return { ok: false, reason: 'invalid_pin', status: 403 }
     }
     // JWT 模式（admin-login 验证码登录）
@@ -71,8 +72,7 @@ export function verifyAdminRequest(req: NextRequest): AdminAuthResult {
   const staffCookie = readCookie(req, STAFF_PIN_COOKIE)
   if (staffCookie && staffCookie.startsWith('pin-')) {
     const pin = staffCookie.slice(4)
-    const STAFF_PINS: string[] = (BUSINESS_CONFIG as any).staffPins || ['1234', '5678', '9012']
-    if (STAFF_PINS.includes(pin)) return { ok: true, via: 'pin', pin }
+    if (verifyCredentialPin('staff', pin)) return { ok: true, via: 'pin', pin }
   }
 
   // ⭐ 优先级 4：StaffGate 实际写的 cookie（zhilin-staff-session，JSON {pin, expiresAt} 格式）
@@ -81,8 +81,7 @@ export function verifyAdminRequest(req: NextRequest): AdminAuthResult {
   if (staffSessionCookie) {
     try {
       const parsed = JSON.parse(decodeURIComponent(staffSessionCookie))
-      const STAFF_PINS: string[] = (BUSINESS_CONFIG as any).staffPins || ['1234', '5678', '9012']
-      if (parsed.pin && STAFF_PINS.includes(parsed.pin) && parsed.expiresAt > Date.now()) {
+      if (parsed.pin && verifyCredentialPin('staff', parsed.pin) && parsed.expiresAt > Date.now()) {
         return { ok: true, via: 'pin', pin: parsed.pin }
       }
     } catch {}

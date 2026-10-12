@@ -1,5 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { verifyPinHashes } from '@/lib/pin-hash'
+import { BUSINESS_CONFIG } from '@/config/business.config'
 
 /**
  * 店主身份 hook（PIN 验证 + 持久化）
@@ -16,10 +18,13 @@ const COOKIE_KEY = 'zhilin-merchant-pin-verified'
 const COOKIE_MAX_AGE = 24 * 60 * 60 // 24h
 
 // ⭐ MEMORY 246 — 默认 PIN（MerchantStaff mock owner PIN）
-const MOCK_PIN_BY_MERCHANT: Record<string, string[]> = {
-  m_zhilin_001: ['1234', '5678', '9012', '2468'],
-  m_grocery_001: ['1234', '5678', '9012', '2468'],
-  '*': ['1234', '5678', '9012', '2468'],
+// ⭐ 2026-10-12：改为比对哈希，源码与前端产物不再出现明文 PIN
+const PIN_PEPPER: string = (BUSINESS_CONFIG as any).pinPepper || ''
+const H: readonly string[] = (BUSINESS_CONFIG as any).staffPinHashes || []
+const PIN_HASH_BY_MERCHANT: Record<string, readonly string[]> = {
+  m_zhilin_001: H,
+  m_grocery_001: H,
+  '*': H,
 }
 
 function readCookie(name: string): string | null {
@@ -64,8 +69,8 @@ export function useMerchantAuth(merchantId: string): MerchantAuthState {
   }, [])
 
   const verify = (pin: string): boolean => {
-    const validPins = MOCK_PIN_BY_MERCHANT[merchantId] || MOCK_PIN_BY_MERCHANT['*']
-    if (validPins.includes(pin.trim())) {
+    const validHashes = PIN_HASH_BY_MERCHANT[merchantId] || PIN_HASH_BY_MERCHANT['*']
+    if (verifyPinHashes(pin, validHashes, PIN_PEPPER)) {
       const now = Date.now()
       writeCookie(COOKIE_KEY, String(now), COOKIE_MAX_AGE)
       setVerifiedAt(now)

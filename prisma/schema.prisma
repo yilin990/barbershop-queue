@@ -439,7 +439,6 @@ model User {
   avatar          String   @default("🌿")
   role            String   @default("普通")
   points          Int      @default(0)          // 通用积分 (兼容老字段)
-  points          Int      @default(0)
   createdAt       DateTime @default(now())
   lastLoginAt     DateTime @default(now())
   age             Int?
@@ -666,4 +665,28 @@ model BarberQueue {
   @@index([merchantId, status])
   @@index([merchantId, scheduledDate])
   @@index([merchantId, createdAt])
+}
+
+
+// ============================================================
+// StaffCredential(门店员工 PIN 凭证)
+// 2026-10-12 奕霖选方案 B：PIN 不再明文写在源码里，改为查表鉴权
+// ⚠️ pinHash 只存 bcrypt 哈希，任何情况下不得存明文
+// ============================================================
+model StaffCredential {
+  id          String    @id @default(cuid())
+  merchantId  String                          // 门店 ID
+  role        String    @default("staff")     // owner | manager | staff
+  label       String    @default("")          // 区分同一角色下的多个 PIN
+  pinHash     String                          // scrypt 哈希，禁止明文
+  pinLength   Int       @default(6)
+  active      Boolean   @default(true)
+  failedCount Int       @default(0)           // 连续失败计数（限流用）
+  lockedUntil DateTime?                       // 锁定截止时间
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([merchantId, role, label])
+  @@index([merchantId, role])
 }

@@ -253,7 +253,7 @@ export function getErrorLockRemainingMs(): number {
  * 首次开店长模式：输 8888（默认）→ 进设置新 PIN 流程
  * 改完后只剩店长知道自己的 PIN，不再用默认
  */
-export const DEFAULT_MANAGER_PIN = '8888'
+export const DEFAULT_MANAGER_PIN = ''
 
 export function verifyDefaultPin(pin: string): boolean {
   return pin.trim() === DEFAULT_MANAGER_PIN

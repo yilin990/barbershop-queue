@@ -19,9 +19,11 @@
  */
 
 import { BUSINESS_CONFIG } from '@/config/business.config'
+import { verifyPinHashes } from './pin-hash'
 
 // 从 config 读 PIN 列表（生产环境可改 .env.local）
-const STAFF_PINS: string[] = (BUSINESS_CONFIG as any).staffPins || ['1234', '5678', '9012']
+const STAFF_PIN_HASHES: readonly string[] = (BUSINESS_CONFIG as any).staffPinHashes || []
+const PIN_PEPPER: string = (BUSINESS_CONFIG as any).pinPepper || ''
 
 const STORAGE_KEY = 'zhilin_staff_auth'
 export const STAFF_COOKIE_KEY = 'zhilin-staff-session'
@@ -35,7 +37,7 @@ interface StaffSession {
 
 /** 验证 PIN 是否有效 */
 export function verifyStaffPin(pin: string): boolean {
-  return STAFF_PINS.includes(pin.trim())
+  return verifyPinHashes(pin, STAFF_PIN_HASHES, PIN_PEPPER)
 }
 
 /** 存 session */
@@ -102,7 +104,8 @@ export function verifyStaffCookie(cookieHeader: string): { success: boolean; pin
     const session = JSON.parse(decoded) as { pin: string; expiresAt: number }
     if (!session?.pin || !session?.expiresAt) return { success: false, error: '会话格式错误' }
     if (Date.now() > session.expiresAt) return { success: false, error: '会话已过期' }
-    if (!STAFF_PINS.includes(session.pin.trim())) return { success: false, error: 'PIN 不在白名单' }
+    if (!verifyPinHashes(session.pin, STAFF_PIN_HASHES, PIN_PEPPER))
+      return { success: false, error: 'PIN 不在白名单' }
     return { success: true, pin: session.pin }
   } catch {
     return { success: false, error: '会话解析失败' }

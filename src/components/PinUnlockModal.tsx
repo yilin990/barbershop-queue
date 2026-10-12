@@ -17,7 +17,7 @@ import {
 } from '@/lib/manager-auth'
 
 // ⭐ 2026-10-01 20:48 奕霖拍板回退：默认 PIN（不暴露具体数字）
-const DEFAULT_PINS = ['8888', '6666', '1314']
+const DEFAULT_PINS: string[] = []
 
 interface PinUnlockModalProps {
   t: any
