@@ -67,6 +67,9 @@ model Merchant {
   merchants     MerchantStaff[]
   suppliers     Supplier[]
   purchaseOrders PurchaseOrder[]
+  identities    Identity[]
+  memberBalances MemberBalance[]
+  memberTxns     MemberTxn[]
 
   @@index([code])
   @@index([status])
@@ -690,3 +693,98 @@ model StaffCredential {
   @@unique([merchantId, role, label])
   @@index([merchantId, role])
 }
+
+// ============================================================
+// 26. ⭐⭐⭐ 客户身份中枢（2026-10-15 02:18 奕霖拍板）
+//
+// 「入口可以借，身份必须自有。」
+// 分界线不是前端用谁的，是【客户身份在谁手里】。
+//
+// 为什么不能沿用 Customer：
+//   Customer 是 @@unique([merchantId, phone]) → 同一个人在两家店 = 两条独立记录
+//   平台换个入口（小程序 → PWA → App），Customer 全部对不上
+//   身份被拆碎 = 数据是平台的，不是自己的
+//
+// Identity 的三件事：
+//   1. phone 全局唯一 —— 跨商户、跨渠道，都是同一个人
+//   2. IdentityChannel 把 openid/unionid 降级成「通道」—— 换前端身份不动
+//   3. MemberBalance / MemberTxn 承载储值和流水 —— 这才是「精准」
+// ============================================================
+model Identity {
+  id          String   @id @default(cuid())
+  phone       String   @unique                   // ⭐ 全局唯一主身份
+  nickname    String?
+  avatar      String?
+  status      String   @default("active")      // active | deactivated
+  note        String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  channels    IdentityChannel[]
+  merchants   Merchant[]                          // 该身份光顾过的门店
+  balances    MemberBalance[]
+  txns        MemberTxn[]
+
+  @@index([lastSeenAt])
+  @@index([status])
+}
+
+// 通道绑定：openid / unionid 只是入口的编号，不是身份本身
+model IdentityChannel {
+  id          String   @id @default(cuid())
+  identityId  String
+  identity    Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  channel     String                              // wxmp | wechat_app | alipay | apple | lite | pwa
+  externalId  String                              // openid / unionid / 通道内唯一号
+  unionId     String?
+  nickname    String?
+  avatar      String?
+  rawProfile  String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@unique([channel, externalId])
+  @@index([identityId])
+  @@index([unionId])
+}
+
+// 储值余额：身份全局，余额按门店分开
+model MemberBalance {
+  id            String   @id @default(cuid())
+  identityId    String
+  identity      Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  merchantId    String
+  merchant      Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  balance       Float    @default(0)
+  totalRecharge Float    @default(0)
+  totalConsume  Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([identityId, merchantId])
+  @@index([merchantId])
+}
+
+// 储值 / 消费流水：只追加，不可变账本
+model MemberTxn {
+  id           String   @id @default(cuid())
+  identityId   String
+  identity     Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  merchantId   String
+  merchant     Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  type         String                              // recharge | consume | adjust | refund
+  amount       Float
+  balanceAfter Float
+  refType      String?
+  refId        String?
+  note         String?
+  operatorId   String?
+  createdAt    DateTime @default(now())
+
+  @@index([identityId, createdAt])
+  @@index([merchantId, createdAt])
+}
+
