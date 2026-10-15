@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   output: 'standalone',
+  // ⭐ 清禾 2026-10-15 22:3x：支持隔离构建。
+  //   默认仍是 .next（生产行为完全不变）；设 NEXT_DIST_DIR=.next-staging
+  //   就能在不碰正在服务的 .next 的前提下出一个可验证的新构建。
+  //   起因：今天 18:31 我直接覆盖了线上 .next，把 3070 干掉了。
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   allowedDevOrigins: [
     'while-bear-pacific-gay.trycloudflare.com',
     '*.trycloudflare.com',

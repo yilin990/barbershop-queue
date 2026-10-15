@@ -12,7 +12,12 @@ import { prisma } from './db'
  *       其中 /txn 是写钱接口 —— 任何人 POST 一下就能给人充值。
  *
  * 本文件不发明新机制，全部复用仓库里已有的真实基建：
- *   · verifyCredentialPin(role, pin, merchantId)  ← scrypt PIN，按门店精确匹配
+    // ⭐⭐ exact: true —— 严格模式，只认属于这一家门店的凭证，
+    //   不接受 merchantId='*' 的通配凭证。
+    //   起因：库里 7 条凭证全是 '*' 通配，若走默认回退，
+    //   任何店长 PIN 都能动任意门店的余额，跨店隔离等于没写。
+    //   代价：目前库里没有精确门店凭证 → 这个接口默认无人能写（fail-closed）。
+    if (verifyCredentialPin(role, pin, merchantId, { exact: true })) return ALLOW(pin)
  *   · verifyAdminRequest(req)                     ← 后台 JWT / 店员 cookie
  *   · PhoneVerification                           ← 短信验证码表（一次性核销）
  *

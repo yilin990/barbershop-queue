@@ -80,18 +80,22 @@ function verifyHash(pin: string, stored: string): boolean {
 export function verifyCredentialPin(
   role: CredentialRole,
   pin: string,
-  merchantId?: string
+  merchantId?: string,
+  opts?: { exact?: boolean }
 ): boolean {
   if (typeof pin !== 'string' || pin.length === 0) return false
   const rows = loadCredentials()
   const scoped = merchantId
-    ? rows.filter((r) => r.role === role && (r.merchantId === merchantId || r.merchantId === '*'))
+    ? rows.filter((r) => r.role === role && (opts?.exact
+        ? r.merchantId === merchantId
+        : (r.merchantId === merchantId || r.merchantId === '*')))
     : rows.filter((r) => r.role === role)
   for (const r of scoped) {
     if (verifyHash(pin, r.pinHash)) return true
   }
   return false
 }
+
 
 /** 该角色当前有多少个可用凭证（管理端展示用） */
 export function credentialCount(role?: CredentialRole): number {

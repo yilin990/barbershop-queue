@@ -94,3 +94,4 @@ prisma/dev.db-wal
 prisma/dev.db-shm
 data/manager-access-code.json
 data/manager-pin.json
+.next.rollback-*/
