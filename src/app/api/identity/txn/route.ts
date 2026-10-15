@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { postTxn, isValidPhone } from '@/lib/identity-core'
 import { prisma } from '@/lib/db'
+import { requireMerchantPin, checkIpLimit, clientIp, operatorTag } from '@/lib/identity-auth'
 
 export const runtime = 'nodejs'
 
@@ -9,13 +10,18 @@ const TYPES = ['recharge', 'consume', 'adjust', 'refund'] as const
 /**
  * POST /api/identity/txn
  *
- *   { identityId | phone, merchantId, type, amount, refType?, refId?, note? }
+ *   Header: x-merchant-pin（或 StaffGate 的 zhilin-staff-session cookie）
+ *   Body:   { identityId | phone, merchantId, type, amount, refType?, refId?, note? }
  *
  * 储值 / 扣款 / 调整 / 退款 —— 一个事务里同时改余额、写流水。
  * 账本只追加，永不改写历史。
  *
- * ⚠️ 这是写钱接口。生产环境必须在调用前校验店长鉴权
- *    （本仓库已有 StaffCredential scrypt 鉴权，接入时校验那个）。
+ * ✅ 2026-10-15 鉴权已接入（清禾）：
+ *    · 必须提供属于该 merchantId 的门店 PIN（scrypt，按门店精确匹配）
+ *    · 不用 JWT 兜底 —— JWT 里没有 merchantId，无法校验跨店越权
+ *    · 限流 60 次/分钟/IP
+ *    · 幂等：同一 refType+refId 已入账则直接返回原结果，不重复入账
+ *    · operatorId 由服务端生成，不再信任客户端传值
  */
 export async function POST(request: NextRequest) {
   try {
@@ -24,7 +30,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请求体不是合法 JSON' }, { status: 400 })
     }
 
-    const { identityId, phone, merchantId, type, amount, refType, refId, note, operatorId } = body
+    const { identityId, phone, merchantId, type, amount, refType, refId, note } = body
+
+    if (typeof merchantId !== 'string' || !merchantId) {
+      return NextResponse.json({ success: false, error: '缺少 merchantId' }, { status: 400 })
+    }
+    if (!TYPES.includes(type)) {
+      return NextResponse.json(
+        { success: false, error: `type 必须是 ${TYPES.join(' | ')}` },
+        { status: 400 }
+      )
+    }
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ success: false, error: 'amount 必须是正数' }, { status: 400 })
+    }
+
+    // ⭐ 鉴权：写钱必须有这个门店的 PIN
+    const auth = requireMerchantPin(request, merchantId)
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status })
+    }
+
+    const lim = checkIpLimit('txn:' + clientIp(request), 60, 60_000)
+    if (!lim.ok) {
+      return NextResponse.json({ success: false, error: '操作过于频繁，请稍后再试' }, { status: 429 })
+    }
 
     let targetIdentityId = identityId
     if (!targetIdentityId) {
@@ -38,17 +68,24 @@ export async function POST(request: NextRequest) {
       targetIdentityId = found.id
     }
 
-    if (typeof merchantId !== 'string' || !merchantId) {
-      return NextResponse.json({ success: false, error: '缺少 merchantId' }, { status: 400 })
-    }
-    if (!TYPES.includes(type)) {
-      return NextResponse.json(
-        { success: false, error: `type 必须是 ${TYPES.join(' | ')}` },
-        { status: 400 }
-      )
-    }
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-      return NextResponse.json({ success: false, error: 'amount 必须是正数' }, { status: 400 })
+    // 幂等：同一个 refType+refId 已经入过账 → 直接返回原结果，绝不重复入账
+    if (typeof refType === 'string' && refType && typeof refId === 'string' && refId) {
+      const dup = await prisma.memberTxn.findFirst({
+        where: {
+          identityId: targetIdentityId,
+          merchantId,
+          type,
+          refType,
+          refId,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (dup) {
+        return NextResponse.json({
+          success: true,
+          data: { balance: dup.balanceAfter, txnId: dup.id, idempotent: true },
+        })
+      }
     }
 
     // ⚠️ 显式 select 真实存在的列（schema.prisma 与线上库有既有漂移，
@@ -69,7 +106,7 @@ export async function POST(request: NextRequest) {
       refType: refType ?? null,
       refId: refId ?? null,
       note: note ?? null,
-      operatorId: operatorId ?? null,
+      operatorId: operatorTag(auth.pin),   // ⭐ 服务端生成，不信任客户端
     })
 
     return NextResponse.json({
