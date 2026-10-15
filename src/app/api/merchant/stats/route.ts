@@ -53,8 +53,15 @@ export async function GET(request: Request) {
       prisma.customer.count({ where: { merchantId: merchant.id } }),  // ⭐ 原来全局 count()，别家店会员也算进来
       prisma.order.count({ where: { merchantId: merchant.id } }),
       prisma.$queryRaw<any[]>`SELECT COUNT(*) as n FROM "Order" WHERE merchantId = ${merchant.id} AND status='delivered'`,
-      prisma.comment.count(),
-      prisma.comment.aggregate({ _avg: { rating: true } }),
+      // ⭐ 2026-10-15 清禾修：原来是 prisma.comment.count() 和全站 aggregate，
+      //   没有 merchantId 也没有 rating 条件 —— 理发店首页显示「13 条评价」，
+      //   平均分被芝小药问诊帖（rating=0，10 条）拉低。
+      //   改为：按门店 + 只算真评价（category 非空的是讨论帖，不是评价）。
+      prisma.comment.count({ where: { merchantId: merchant.id, category: null, rating: { gt: 0 } } }),
+      prisma.comment.aggregate({
+        where: { merchantId: merchant.id, category: null, rating: { gt: 0 } },
+        _avg: { rating: true },
+      }),
     ])
 
     return NextResponse.json({

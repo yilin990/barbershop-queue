@@ -482,10 +482,17 @@ model Comment {
   title     String?
   tags      String?
 
+  // ⭐ 2026-10-15 清禾加：门店归属。
+  //   原表没有 merchantId，导致 /api/comments 只能传参不生效（where 两个分支都是 {}），
+  //   全站 13 条（药房评价 + 芝小药问诊帖）被算成理发店的评价。
+  //   ⭐ 可为空：category 非空的讨论/问诊帖不属于任何门店，保持 NULL 是正确的。
+  merchantId String?
+
   replies   Reply[]
 
   @@index([userId])
   @@index([category])
+  @@index([merchantId])
 }
 
 model Reply {

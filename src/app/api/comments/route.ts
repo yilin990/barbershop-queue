@@ -12,7 +12,14 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
 
-    const where = merchantId ? {} : {} // filter by merchant later
+    // ⭐ 2026-10-15 清禾修：原来是 `merchantId ? {} : {}`（两分支都是空对象），
+    //   传什么都不影响结果 —— 实测 barber / 不传参 / 瞎编门店 三种都返回全站 13 条。
+    //   真正过滤：按门店 + 只取「真评价」（category 非空的是芝小药讨论帖，不是评价）。
+    const where = {
+      ...(merchantId ? { merchantId } : {}),
+      category: null,
+      rating: { gt: 0 },
+    }
     const skip = (page - 1) * limit
 
     const [comments, total] = await Promise.all([
