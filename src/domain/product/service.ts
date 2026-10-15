@@ -77,9 +77,12 @@ export interface ListProductsResult {
  *   - 用户输入 q/category/qm/functionTag 全 escape（防 SQL 注入）
  *   - 5 分钟 serverCache 包裹（同 query 直接命中 <1ms）
  */
+/** 默认商户编码：B0001 = 造型师助手（理发）。原来写 G0001 是果蔬鲜生，理发店首页因此显示螺丝椒。 */
+const DEFAULT_MERCHANT_CODE = 'B0001'
+
 export async function listProducts(input: ListProductsInput): Promise<ListProductsResult> {
   const {
-    merchantCode = 'G0001',  // ⭐ MEMORY §283 — 奕霖锁理发行业,默认 G0001(造型师助手)
+    merchantCode = DEFAULT_MERCHANT_CODE,  // ⭐ 2026-10-15 清禾修：原来写死 G0001(果蔬鲜生)
     q = '',
     category = '',
     qm = '',
