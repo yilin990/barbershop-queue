@@ -1,0 +1,17 @@
+{
+  "pins": [
+    {
+      "salt": "83ba08f18b32a8ec4d3f65987fcc065e",
+      "hash": "c65cc1415b482d63b1f5326e3e95a8895688d564a5125039d97c6455d8fd3c39"
+    },
+    {
+      "salt": "bc5bd961ed37a7feea6dc8b2945ee475",
+      "hash": "99eaaeb3d91e38d32ab28a309e65c18fd2ce6432b790eac5a244bb208f61ed48"
+    },
+    {
+      "salt": "9f4a09052e2c51b2f3a5c65ae01a2d6e",
+      "hash": "d324744a659bbb72f76338bac155e5faa7c0aaadb40b47662440494d5c312b40"
+    }
+  ],
+  "updatedAt": "2026-10-08T08:31:09.016Z"
+}

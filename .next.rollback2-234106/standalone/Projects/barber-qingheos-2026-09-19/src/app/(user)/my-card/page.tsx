@@ -1,0 +1,426 @@
+'use client'
+
+/**
+ * /my-card - 顾客查自己的卡（v1.1.38 · 2026-10-07 清禾）
+ *
+ * 顾客不该为了问「我卡里还剩多少钱」去麻烦店员。
+ * 余额变动推送点进来也落在这个页面。
+ *
+ * 只读：这里不给任何写操作。改余额只能店长在队列页或会员页做。
+ */
+
+import { useSearchParams } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { DEFAULT_MERCHANT_ID, resolveMerchantIdFromQuery } from '@/lib/merchant'
+import { resolveServiceCategory, serviceCategoryLabel, serviceCategoryIcon } from '@/lib/serviceCategory'
+
+interface Card {
+  id: string
+  phone: string
+  nickname: string | null
+  balanceYuan: number
+  rechargeYuan: number
+  consumeYuan: number
+  visitCount: number
+  level: string
+  levelLabel: string
+  discount: number
+  status: string
+  nextLevel: { key: string; label: string } | null
+  toNextCents: number
+}
+
+interface LogRow {
+  id: string
+  type: string
+  changeCents: number
+  balanceAfter: number
+  service: string | null
+  note: string | null
+  createdAt: string
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  open: '开卡', recharge: '充值', consume: '消费',
+  adjust: '调整', frozen: '冻结', unfreeze: '解冻',
+}
+const LEVEL_COLOR: Record<string, string> = {
+  normal: '#94a3b8', silver: '#8a8d98', gold: '#b8860b', diamond: '#7c3aed',
+}
+const yuan = (n: number) => '¥' + Number(n || 0).toFixed(2)
+
+const STATUS_TEXT: Record<string, string> = {
+  reserved: '已预约', arrived: '已到店', serving: '服务中',
+  completed: '已完成', no_show: '未到店',
+}
+const STATUS_COLOR: Record<string, any> = {
+  reserved: { color: '#b8860b', fontSize: 12, fontWeight: 700 },
+  arrived: { color: '#2563eb', fontSize: 12, fontWeight: 700 },
+  serving: { color: '#7c3aed', fontSize: 12, fontWeight: 700 },
+  completed: { color: '#16a34a', fontSize: 12, fontWeight: 700 },
+  no_show: { color: '#9ca3af', fontSize: 12, fontWeight: 700 },
+}
+
+export default function MyCardPage() {
+  return <Suspense fallback={null}><Inner /></Suspense>
+}
+
+function Inner() {
+  const sp = useSearchParams()
+  const merchantId = resolveMerchantIdFromQuery(sp) || DEFAULT_MERCHANT_ID
+  const phone = (sp.get('phone') || '').replace(/[^\d]/g, '')
+
+  const [card, setCard] = useState<Card | null>(null)
+  const [logs, setLogs] = useState<LogRow[]>([])
+  const [state, setState] = useState<'idle' | 'loading' | 'none' | 'ready' | 'bad'>('idle')
+  const [input, setInput] = useState(phone)
+  // v1.1.39 订单记录：预约 / 现场取号 也要能看到
+  const [orders, setOrders] = useState<any[]>([])
+  // v1.1.43 区块折叠：记录多的时候一屏拉不到底
+  const [open, setOpen] = useState({ logs: true, orders: false })
+  // ⭐ v1.1.47 奕霖立：流水按「充值/消费」分类，订单按「理发/染发/烫发/护发/造型」分类
+  const [logFilter, setLogFilter] = useState<'all' | 'recharge' | 'consume'>('all')
+  const [orderFilter, setOrderFilter] = useState<string>('all')
+
+  const logStats = useMemo(() => {
+    const m: Record<string, number> = { all: logs.length, recharge: 0, consume: 0 }
+    for (const l of logs) {
+      if (l.type === 'recharge') m.recharge++
+      else if (l.type === 'consume') m.consume++
+    }
+    return m
+  }, [logs])
+  const filteredLogs = useMemo(
+    () => (logFilter === 'all' ? logs : logs.filter((l: any) => l.type === logFilter)),
+    [logs, logFilter]
+  )
+
+  const orderStats = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const o of orders) {
+      const c = resolveServiceCategory(o.service) || 'other'
+      m[c] = (m[c] || 0) + 1
+    }
+    return m
+  }, [orders])
+  // 只显示真有数据的分类
+  const orderChips = useMemo(
+    () => ['cut', 'dye', 'perm', 'care', 'style', 'other'].filter(k => (orderStats[k] || 0) > 0),
+    [orderStats]
+  )
+  const filteredOrders = useMemo(
+    () => (orderFilter === 'all'
+      ? orders
+      : orders.filter((o: any) => (resolveServiceCategory(o.service) || 'other') === orderFilter)),
+    [orders, orderFilter]
+  )
+
+  const load = useCallback(async (p: string) => {
+    if (!/^1\d{10}$/.test(p)) { setState('bad'); return }
+    setState('loading')
+    try {
+      const r = await fetch(
+        '/api/members/' + encodeURIComponent(p) + '?merchantId=' + merchantId
+      )
+      const j = await r.json()
+      if (j.ok) {
+        setCard(j.card); setLogs(j.logs || []); setState('ready')
+        // 顺带拉订单记录（按手机号过滤）
+        fetch('/api/queues?merchantId=' + merchantId, { cache: 'no-store' })
+          .then(r => r.json())
+          .then(q => {
+            if (q.success && Array.isArray(q.queues))
+              setOrders(q.queues.filter((x: any) => x.customerPhone === p))
+          })
+          .catch(() => {})
+      }
+      else { setCard(null); setState('none') }
+    } catch {
+      setState('none')
+    }
+  }, [merchantId])
+
+  useEffect(() => { if (phone) load(phone) }, [phone, load])
+
+  return (
+    <div style={S.page}>
+      <div style={S.head}>
+        <div style={S.logo}>💳</div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: '#1f2937' }}>我的卡</div>
+        <div style={{ fontSize: 11, opacity: 0.5 }}>余额、消费记录一目了然</div>
+      </div>
+
+      {!phone && state === 'idle' && (
+        <div style={S.box}>
+          <div style={{ fontSize: 14, marginBottom: 10 }}>输入办卡时用的手机号</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value.replace(/[^\d]/g, ''))}
+              inputMode="numeric"
+              maxLength={11}
+              placeholder="11 位手机号"
+              style={S.input}
+            />
+            <button style={S.go} onClick={() => load(input)}>查询</button>
+          </div>
+        </div>
+      )}
+
+      {state === 'loading' && <div style={S.hint}>查询中…</div>}
+
+      {state === 'bad' && (
+        <div style={S.hint}>手机号格式不对，要 11 位数字</div>
+      )}
+
+      {state === 'none' && (
+        <div style={S.box}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>🙂</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>还没有会员卡</div>
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
+            到店跟店长说一声就能开卡，储值的钱先进来
+          </div>
+        </div>
+      )}
+
+      {state === 'ready' && card && (
+        <>
+          <div style={S.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* v1.1.42 修崩溃：S.badge 是样式对象(273行)，不是函数，
+                  原来写成 S.badge(card.level) 当函数调用 -> TypeError ->
+                  整个 /my-card 页面崩成「This page couldn't load」。
+                  带 ?phone= 才崩（要渲染卡才有这行），所以登录后才点得着。 */}
+              <span style={S.badge}>{card.levelLabel}</span>
+              <span style={{ fontSize: 11, opacity: 0.6 }}>
+                {(card.discount * 10).toFixed(1)} 折
+              </span>
+            </div>
+            {/* v1.1.43 原来这里 color: gold 印在金色渐变卡上 —— 同色系贴脸，
+                40px 看不清。现在白字 56px 900 字重，投影托底，一眼就抓到。 */}
+            <div style={{
+              fontSize: 12, opacity: 0.8, marginTop: 20,
+              letterSpacing: 2, fontWeight: 600,
+            }}>卡内余额</div>
+            <div style={{
+              fontSize: 56, fontWeight: 900, color: '#fff',
+              lineHeight: 1.05, marginTop: 2, letterSpacing: -1,
+              textShadow: '0 2px 14px rgba(0,0,0,.28)',
+            }}>
+              {yuan(card.balanceYuan)}
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>
+              {card.nickname || ''} · {card.phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2')}
+            </div>
+            {card.nextLevel && (
+              <div style={S.upgrade}>
+                再充值 {yuan(card.toNextCents / 100)} 升 {card.nextLevel.label}
+                <div style={{ height: 4, background: 'rgba(184,134,11,.18)', borderRadius: 2, marginTop: 6 }}>
+                  <div style={{
+                    height: '100%',
+                    borderRadius: 2,
+                    background: gold,
+                    width: Math.min(100, Math.round(
+                      (card.rechargeYuan * 100) /
+                      Math.max(1, card.toNextCents + card.rechargeYuan * 100) * 100
+                    )) + '%',
+                  }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={S.stats}>
+            <Stat label="累计充值" value={yuan(card.rechargeYuan)} />
+            <Stat label="累计消费" value={yuan(card.consumeYuan)} />
+            <Stat label="到店次数" value={String(card.visitCount)} />
+          </div>
+
+          <FoldToggle
+            title="消费记录"
+            count={logs.length}
+            open={open.logs}
+            onToggle={() => setOpen(p => ({ ...p, logs: !p.logs }))}
+          />
+          {open.logs && (
+          <div style={S.scroll}>
+            {/* ⭐ v1.1.47 奕霖立：流水分类（充值 / 消费） */}
+            <div style={S.chipRow}>
+              <Chip label="全部" count={logStats.all} active={logFilter === 'all'} onClick={() => setLogFilter('all')} />
+              <Chip label="充值" count={logStats.recharge} active={logFilter === 'recharge'} onClick={() => setLogFilter('recharge')} />
+              <Chip label="消费" count={logStats.consume} active={logFilter === 'consume'} onClick={() => setLogFilter('consume')} />
+            </div>
+            {filteredLogs.length ? filteredLogs.map(l => (
+              <div key={l.id} style={S.logRow}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {TYPE_LABEL[l.type] || l.type}
+                    {l.service ? ' · ' + l.service : ''}
+                  </div>
+                  {l.note ? <div style={{ fontSize: 11, opacity: 0.5 }}>{l.note}</div> : null}
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{
+                    fontWeight: 800,
+                    color: l.changeCents >= 0 ? '#16a34a' : '#dc2626',
+                  }}>
+                    {l.changeCents >= 0 ? '+' : ''}{(l.changeCents / 100).toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>
+                    余 {(l.balanceAfter / 100).toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            )) : <div style={S.hint}>还没有记录</div>}
+          </div>
+          )}
+
+          <FoldToggle
+            title="我的订单"
+            count={orders.length}
+            open={open.orders}
+            onToggle={() => setOpen(p => ({ ...p, orders: !p.orders }))}
+          />
+          {open.orders && (
+          <div style={S.scroll}>
+            {/* ⭐ v1.1.47 奕霖立：订单按服务分类（理发/染发/烫发/护发/造型） */}
+            {orderChips.length > 1 && (
+              <div style={S.chipRow}>
+                <Chip label="全部" count={orders.length} active={orderFilter === 'all'} onClick={() => setOrderFilter('all')} />
+                {orderChips.map(k => (
+                  <Chip
+                    key={k}
+                    label={serviceCategoryIcon(k) + ' ' + serviceCategoryLabel(k)}
+                    count={orderStats[k] || 0}
+                    active={orderFilter === k}
+                    onClick={() => setOrderFilter(k)}
+                  />
+                ))}
+              </div>
+            )}
+            {filteredOrders.length ? filteredOrders.map(o => (
+              <div key={o.id} style={S.logRow}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {o.orderNo} · {o.service}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>
+                    {o.type === 'ticket' ? '现场取号' : '预约'} · {o.stylistName} 老师 · {o.scheduledAt}
+                  </div>
+                </div>
+                <span style={STATUS_COLOR[o.status] || { color: '#6b7280' }}>
+                  {STATUS_TEXT[o.status] || o.status}
+                </span>
+              </div>
+            )) : <div style={S.hint}>还没有订单</div>}
+          </div>
+          )}
+
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <button style={S.again} onClick={() => { setState('idle'); setCard(null) }}>
+              查别的手机号
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value }: any) {
+  return (
+    <div style={S.stat}>
+      <div style={{ fontSize: 11, opacity: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 800 }}>{value}</div>
+    </div>
+  )
+}
+
+const gold = '#b8860b'
+const LEVEL_COLOR2 = LEVEL_COLOR
+const S: any = {
+  page: { minHeight: '100vh', background: '#faf6f0', padding: '20px 16px 40px' },
+  head: { textAlign: 'center', marginBottom: 20 },
+  logo: { fontSize: 34, marginBottom: 6 },
+  box: { background: '#fff', borderRadius: 14, padding: 24, textAlign: 'center', border: '1px solid #f0e6d2' },
+  input: {
+    flex: 1, padding: '11px 14px', borderRadius: 10, fontSize: 15,
+    border: '1px solid #e5e7eb', boxSizing: 'border-box',
+  },
+  go: {
+    background: gold, color: '#fff', border: 'none', borderRadius: 10,
+    padding: '0 20px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+  },
+  hint: { textAlign: 'center', padding: 36, color: '#9ca3af', fontSize: 13 },
+  card: {
+    background: 'linear-gradient(135deg,#b8860b,#d4a017)',
+    borderRadius: 18, padding: '18px 20px 22px', color: '#fff',
+    boxShadow: '0 6px 20px rgba(184,134,11,.28)',
+  },
+  badge: { fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,.25)', padding: '3px 10px', borderRadius: 8 },
+  upgrade: { marginTop: 16, fontSize: 11, opacity: 0.9 },
+  stats: { display: 'flex', gap: 8, margin: '12px 0' },
+  stat: {
+    flex: 1, background: '#fff', borderRadius: 12, padding: '12px 8px',
+    textAlign: 'center', border: '1px solid #f0e6d2',
+  },
+  secTitle: { fontSize: 13, fontWeight: 700, color: '#374151', margin: '18px 0 8px' },
+  logs: { background: '#fff', borderRadius: 14, border: '1px solid #f0e6d2', overflow: 'hidden' },
+  chipRow: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
+  // v1.1.43 卡片内滑动：记录多的时候别把页面撑到拉不到底
+  scroll: {
+    background: '#fff', borderRadius: 14, border: '1px solid #f0e6d2',
+    marginTop: 8, maxHeight: 300, overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch' as const, overscrollBehavior: 'contain',
+  },
+  logRow: { display: 'flex', alignItems: 'center', padding: '11px 14px', borderBottom: '1px solid #f9fafb', fontSize: 13 },
+  again: { background: 'none', border: '1px solid #e5e7eb', borderRadius: 10, padding: '9px 18px', color: '#6b7280', fontSize: 13 },
+}
+
+// v1.1.43 可折叠区块：记录一多就拉不到底，余额反而被挤到看不见
+function FoldToggle({ title, count, open, onToggle }: {
+  title: string; count: number; open: boolean; onToggle: () => void
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        width: '100%', marginTop: 18, padding: '13px 15px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+        fontSize: 14, fontWeight: 800, color: '#1f2937', cursor: 'pointer',
+      }}
+    >
+      <span>{title}<span style={{ color: '#9ca3af', fontWeight: 700 }}>（{count}）</span></span>
+      <span style={{
+        display: 'inline-block',
+        transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform .2s', color: '#9ca3af', fontSize: 11,
+      }}>▼</span>
+    </button>
+  )
+}
+
+
+
+// ⭐ v1.1.47 奕霖立：会员卡页的分类筛选 chip（订单页有自己的 CategoryChip，不共用）
+function Chip({ label, count, active, onClick }: {
+  label: string; count: number; active: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '6px 12px', borderRadius: 999,
+        background: active ? '#b8860b' : '#f3f4f6',
+        border: active ? '1px solid #b8860b' : '1px solid #e5e7eb',
+        cursor: 'pointer', fontSize: 13, fontWeight: 700,
+        color: active ? '#fff' : '#374151',
+      }}
+    >
+      {label}
+      <span style={{ fontSize: 11, opacity: 0.85 }}>{count}</span>
+    </button>
+  )
+}

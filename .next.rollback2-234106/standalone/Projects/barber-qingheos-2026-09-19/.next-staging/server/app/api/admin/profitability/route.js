@@ -1,0 +1,8 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/admin/profitability/route.js")
+R.c("server/chunks/[root-of-the-server]__0wn7gh.._.js")
+R.c("server/chunks/[root-of-the-server]__0on~qub._.js")
+R.c("server/chunks/0.6__next_0tjf-_y._.js")
+R.c("server/chunks/[root-of-the-server]__0_.abxl._.js")
+R.c("server/chunks/0e1n__next-internal_server_app_api_admin_profitability_route_actions_048.py~.js")
+R.m(10084)
+module.exports=R.m(10084).exports

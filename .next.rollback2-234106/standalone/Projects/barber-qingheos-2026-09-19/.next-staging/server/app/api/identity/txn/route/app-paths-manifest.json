@@ -1,0 +1,3 @@
+{
+  "/api/identity/txn/route": "app/api/identity/txn/route.js"
+}

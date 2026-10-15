@@ -1,0 +1,3 @@
+{
+  "/api/admin/products/[id]/extract-white-bg/route": "app/api/admin/products/[id]/extract-white-bg/route.js"
+}

@@ -1,0 +1,3 @@
+{
+  "/api/admin/coupons/export/route": "app/api/admin/coupons/export/route.js"
+}

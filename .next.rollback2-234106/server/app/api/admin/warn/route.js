@@ -1,0 +1,8 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/admin/warn/route.js")
+R.c("server/chunks/[root-of-the-server]__03w6wfs._.js")
+R.c("server/chunks/[root-of-the-server]__0on~qub._.js")
+R.c("server/chunks/0.6__next_0tjf-_y._.js")
+R.c("server/chunks/[root-of-the-server]__0_.abxl._.js")
+R.c("server/chunks/0e1n__next-internal_server_app_api_admin_warn_route_actions_120_764.js")
+R.m(880100)
+module.exports=R.m(880100).exports

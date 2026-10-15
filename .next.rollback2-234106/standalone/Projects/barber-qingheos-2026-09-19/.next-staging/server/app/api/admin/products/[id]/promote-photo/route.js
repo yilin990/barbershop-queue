@@ -1,0 +1,11 @@
+var R=require("../../../../../../chunks/[turbopack]_runtime.js")("server/app/api/admin/products/[id]/promote-photo/route.js")
+R.c("server/chunks/[root-of-the-server]__0-l9ugt._.js")
+R.c("server/chunks/[root-of-the-server]__0nvafqb._.js")
+R.c("server/chunks/Projects_barber-qingheos-2026-09-19_05miecx._.js")
+R.c("server/chunks/0.6__next_0tjf-_y._.js")
+R.c("server/chunks/0.6__02~0ibg._.js")
+R.c("server/chunks/[root-of-the-server]__0_.abxl._.js")
+R.c("server/chunks/[root-of-the-server]__0on~qub._.js")
+R.c("server/chunks/0j7-_server_app_api_admin_products_[id]_promote-photo_route_actions_0.tmptf.js")
+R.m(999693)
+module.exports=R.m(999693).exports

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "prod_001",
+    "name": "复方感冒灵颗粒",
+    "category": "感冒用药",
+    "price": 15.5,
+    "stock": 100,
+    "description": "解热镇痛，用于感冒引起的头痛、发热、鼻塞",
+    "createdAt": "2026-05-27T06:48:17.411Z"
+  },
+  {
+    "id": "prod_002",
+    "name": "布洛芬缓释胶囊",
+    "category": "止痛镇痛",
+    "price": 22,
+    "stock": 80,
+    "description": "缓解疼痛，退热",
+    "createdAt": "2026-05-27T06:48:17.411Z"
+  }
+]
