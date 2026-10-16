@@ -95,3 +95,10 @@ prisma/dev.db-shm
 data/manager-access-code.json
 data/manager-pin.json
 .next.rollback-*/
+
+# 构建产物目录（2026-10-16 加：防止 410M 构建被误 commit）
+.next-staging/
+.next-release*/
+.next.rollback-*/
+.next-build-*/
+*.tsbuildinfo

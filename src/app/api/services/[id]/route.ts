@@ -13,6 +13,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { errorResponse, successResponse } from '@/lib/error'
+import { requireStaffOrAdmin, guardFail } from '@/lib/require-staff-or-admin'
 
 export const runtime = 'nodejs'
 
@@ -43,6 +44,10 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // 2026-10-16 清禾：管理侧写操作需店员/管理员身份（同源 cookie 自动带，后台页面无需改代码）
+  const guard = requireStaffOrAdmin(request)
+  if (!guard.ok) return guardFail(guard)
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -96,6 +101,10 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // 2026-10-16 清禾：管理侧写操作需店员/管理员身份（同源 cookie 自动带，后台页面无需改代码）
+  const guard = requireStaffOrAdmin(request)
+  if (!guard.ok) return guardFail(guard)
+
   try {
     const { id } = await params
     const { searchParams } = new URL(request.url)

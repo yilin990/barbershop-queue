@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ADMIN_MERCHANT_ID } from '@/lib/admin-merchant'
 import { prisma } from '@/lib/db'
+import { verifyAdminRequest, unauthorized } from '@/lib/admin-jwt-auth'
 
 export const runtime = 'nodejs'
 
@@ -10,6 +11,11 @@ export const runtime = 'nodejs'
  * 0-1 阶段：返回所有客户，按 totalSpent 降序
  */
 export async function GET(request: NextRequest) {
+  const auth = verifyAdminRequest(request)
+  // tsconfig 的 **/*.ts 把 .next* 里的 12 份副本也扫进来了，
+  // AdminAuthResult 有多份声明导致收窄不稳，这里显式收窄避开
+  if (!auth.ok) return unauthorized(auth as Extract<typeof auth, { ok: false }>)
+
   try {
     // raw SQL 带 status 字段（schema validation 失败，prisma client 没这些字段）
     const customers: any[] = await prisma.$queryRaw`

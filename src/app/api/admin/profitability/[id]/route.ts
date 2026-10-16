@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { verifyAdminRequest, unauthorized } from '@/lib/admin-jwt-auth'
 import { ADMIN_MERCHANT_ID } from '@/lib/admin-merchant'
 
 export const runtime = 'nodejs'
@@ -22,6 +23,11 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = verifyAdminRequest(request)
+  // tsconfig 的 **/*.ts 把 .next* 里的 12 份副本也扫进来了，
+  // AdminAuthResult 有多份声明导致收窄不稳，这里显式收窄避开
+  if (!auth.ok) return unauthorized(auth as Extract<typeof auth, { ok: false }>)
+
   try {
     const { id } = await params
     const body = await request.json().catch(() => ({}))
