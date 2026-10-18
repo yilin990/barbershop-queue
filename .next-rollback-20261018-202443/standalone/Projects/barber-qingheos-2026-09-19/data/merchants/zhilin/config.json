@@ -1,0 +1,46 @@
+{
+  "id": "zhilin",
+  "name": "芝林大药房",
+  "slogan": "守护健康 · 就在身边",
+  "description": "30 年老字号药房，专业 AI 健康咨询 + 24 小时急用药。",
+  "industry": "pharmacy",
+  "theme": {
+    "bgDeep": "#0a0f0d",
+    "bgCard": "#111916",
+    "teal": "#2dd4bf",
+    "tealDark": "#14b8a6",
+    "tealGlow": "rgba(45, 212, 191, 0.15)",
+    "green": "#4ade80",
+    "greenDark": "#059669",
+    "text": "#f0fdf4",
+    "textSecondary": "#9ca3af",
+    "textMuted": "#6b7280",
+    "glassBorder": "rgba(45, 212, 191, 0.2)",
+    "accent": "#f472b6"
+  },
+  "contact": {
+    "phone": "0856-5211-2345",
+    "address": "贵州省铜仁市碧江区环北清水大道清水花园一栋1单元10-11号",
+    "hours": "周一至周日 08:00-22:00"
+  },
+  "assets": {
+    "logo": "/merchants/zhilin/logo.png",
+    "favicon": "/favicon.ico"
+  },
+  "products": [
+    { "id": "p001", "name": "感冒灵颗粒", "price": 18, "category": "感冒用药" },
+    { "id": "p002", "name": "板蓝根冲剂", "price": 22, "category": "感冒用药" },
+    { "id": "p003", "name": "阿莫西林胶囊", "price": 14, "category": "抗生素" }
+  ],
+  "services": [
+    { "id": "s001", "name": "AI 健康咨询", "duration": 0, "price": 0 },
+    { "id": "s002", "name": "用药提醒", "duration": 0, "price": 0 },
+    { "id": "s003", "name": "送药上门", "duration": 60, "price": 5 }
+  ],
+  "members": [],
+  "settings": {
+    "queueEnabled": false,
+    "aiConsultant": true,
+    "deliveryAvailable": true
+  }
+}

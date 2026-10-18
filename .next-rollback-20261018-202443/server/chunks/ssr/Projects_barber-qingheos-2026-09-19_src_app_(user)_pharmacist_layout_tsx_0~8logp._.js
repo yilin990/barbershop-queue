@@ -1,0 +1,3 @@
+module.exports=[145971,a=>{"use strict";var b=a.i(552469),c=a.i(515288);let d={title:`风格库 \xb7 您的造型灵感 | ${c.BUSINESS_CONFIG.name}`,description:`${c.BUSINESS_CONFIG.name} - 造型 AI 助手，根据脸型与发质推荐发型、染发配色、风格史追踪、就近门店。`,keywords:["风格库","造型AI","发型推荐","染发配色","脸型推荐","铜仁","造型师助手","专属造型顾问"],openGraph:{title:"风格库 · 您的造型灵感",description:"造型 AI 助手 · 根据脸型推荐发型 · 染发配色建议 · 发型史追踪 · 10:00-22:00 营业",type:"website",locale:"zh_CN"}};a.s(["default",0,function({children:a}){return(0,b.jsx)(b.Fragment,{children:a})},"metadata",0,d])},284978,a=>{a.n(a.i(145971))}];
+
+//# sourceMappingURL=Projects_barber-qingheos-2026-09-19_src_app_%28user%29_pharmacist_layout_tsx_0~8logp._.js.map

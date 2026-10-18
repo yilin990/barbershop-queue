@@ -1,0 +1,61 @@
+/**
+ * /api/admin/retail/coupons/user — POS 收银台拿顾客可用券（2026-08-02 奕霖需求）
+ *
+ * GET: 拿指定手机号的未用券（含过期过滤）
+ *   query: ?phone=xxx
+ *   返回: { success, coupons: [{id, code, name, value, minSpend, expiresAt, daysLeft}] }
+ */
+
+import { NextRequest } from 'next/server'
+import { prisma } from '@/lib/db'
+import { ADMIN_MERCHANT_ID } from '@/lib/admin-merchant'
+import { verifyStaffCookie } from '@/lib/staff-auth'
+import { errorResponse, successResponse, AuthError } from '@/lib/error'
+
+export const runtime = 'nodejs'
+
+const DEFAULT_MERCHANT_CODE = 'G0001'
+
+export async function GET(request: NextRequest) {
+  try {
+    // 验证店员（POS 收银场景）
+    const cookieHeader = request.headers.get('cookie') || ''
+    const staffAuth = verifyStaffCookie(cookieHeader)
+    if (!staffAuth.success) {
+      throw new AuthError(staffAuth.error || '店员未登录')
+    }
+
+    const { searchParams } = new URL(request.url)
+    const phone = (searchParams.get('phone') || '').trim()
+    if (!phone) throw new Error('phone 必填')
+
+    const merchants = await prisma.$queryRaw<any[]>`
+      SELECT id FROM Merchant WHERE code = ${DEFAULT_MERCHANT_CODE} LIMIT 1
+    `
+    if (merchants.length === 0) throw new Error('药房信息不存在')
+    const merchantId = merchants[0].id
+
+    // 拿未过期 + 未使用的券
+    const coupons = await prisma.$queryRaw<any[]>`
+      SELECT id, code, name, type, value, minSpend, expiresAt, createdAt
+      FROM Coupon
+      WHERE merchantId = ${merchantId}
+        AND phone = ${phone}
+        AND status = 'unused'
+        AND datetime(expiresAt) > datetime('now')
+      ORDER BY minSpend ASC, value DESC
+    `
+
+    // 计算剩余天数
+    const now = Date.now()
+    const enriched = coupons.map((c: any) => {
+      const ms = new Date(c.expiresAt).getTime() - now
+      const daysLeft = Math.max(0, Math.floor(ms / 86400000))
+      return { ...c, daysLeft }
+    })
+
+    return successResponse({ coupons: enriched })
+  } catch (e) {
+    return errorResponse(e)
+  }
+}

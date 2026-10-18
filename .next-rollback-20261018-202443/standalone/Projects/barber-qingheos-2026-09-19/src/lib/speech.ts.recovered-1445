@@ -1,0 +1,494 @@
+// speech.ts - Web Speech API 封装 + TTS 音频队列管理（支持流式打断）
+
+import { Message } from '@/domain/chat/service'
+
+// ---------------------------------------------------------------------------
+// 类型定义
+// ---------------------------------------------------------------------------
+export interface SpeechRecognitionResult {
+  transcript: string
+  isFinal: boolean
+}
+
+export type SpeechCallback = (result: SpeechRecognitionResult) => void
+export type ErrorCallback = (error: string) => void
+
+// ---------------------------------------------------------------------------
+// TTS 内存缓存（奕霖 2026-06-30 18:28 反馈语音生成慢）
+// 同一文本不重复生成，LRU 100 条上限
+// ---------------------------------------------------------------------------
+const TTS_CACHE_MAX = 100
+const ttsCache = new Map<string, string>()
+
+function hashText(text: string): string {
+  let h = 0
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) - h) + text.charCodeAt(i)
+    h |= 0
+  }
+  return h.toString(36) + '_' + text.length
+}
+
+function getCachedAudio(text: string): string | null {
+  const key = hashText(text)
+  const url = ttsCache.get(key)
+  if (url) {
+    ttsCache.delete(key)
+    ttsCache.set(key, url)
+    return url
+  }
+  return null
+}
+
+function setCachedAudio(text: string, url: string): void {
+  const key = hashText(text)
+  if (ttsCache.has(key)) ttsCache.delete(key)
+  ttsCache.set(key, url)
+  if (ttsCache.size > TTS_CACHE_MAX) {
+    const firstKey = ttsCache.keys().next().value
+    if (firstKey) {
+      const oldUrl = ttsCache.get(firstKey)
+      if (oldUrl) URL.revokeObjectURL(oldUrl)
+      ttsCache.delete(firstKey)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 全局语音停止事件（v3.0 2026-06-30 19:11 奕霖反馈喇叭不能暂停）
+// 让 VoiceOutput 点击能彻底停掉流式自动播报（abort + 清队列）
+// ---------------------------------------------------------------------------
+export const VOICE_STOP_ALL_EVENT = 'qinghe-voice-stop-all'
+
+export function emitVoiceStopAll(): void {
+  stopAllAudio()
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(VOICE_STOP_ALL_EVENT))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 音频队列管理器（全局单例，支持打断、保证顺序）
+// ---------------------------------------------------------------------------
+class AudioQueueManager {
+  private queue: string[] = [] // 待播放的音频 URL
+  private isPlaying = false
+  private currentAudio: HTMLAudioElement | null = null
+  private onQueueEmpty: (() => void) | null = null
+  private onSpeakingChange: ((speaking: boolean) => void) | null = null
+  // v4.0 (2026-07-03)：预合成队列 - 记录每个 enqueue 的入队顺序和 promise，
+  // fetch 完成后再按顺序入队，保证播放顺序严格按 enqueue 调用顺序
+  private pendingFetches: Array<Promise<string>> = []
+
+  // 添加到队列（fetch TTS 并加入播放队列）
+  // v2.0: 串行化 fetch，保证后入队的 TTS 不会跳到先入队的前面播
+  // v3.0 (2026-06-30): 加内存缓存 + 遇 stop 跳过
+  // v4.0 (2026-07-03): 并行 fetch + 预合成下一段，播放顺序按入队顺序（奕霖反馈 TTS 慢）
+  async enqueue(text: string): Promise<void> {
+    if (!text.trim()) return
+    const cleaned = text.trim().slice(0, 500)
+
+    // ⭐ 缓存命中：直接入队
+    const cached = getCachedAudio(cleaned)
+    if (cached) {
+      this.queue.push(cached)
+      if (!this.isPlaying) this.playNext()
+      return
+    }
+
+    // v4.0：并行 fetch，每段独立合成；fetch 完成后**按入队顺序**入队
+    // 实现：先记下这是第几段 fetch，fetch 完成后判断前面是否都好了
+    const order = this.pendingFetches.length
+    const fetchPromise = (async () => {
+      try {
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleaned }),
+        })
+        if (!res.ok) {
+          console.warn('[AudioQueue] TTS fetch failed:', res.status)
+          return ''
+        }
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        setCachedAudio(cleaned, url)
+        return url
+      } catch (err) {
+        console.warn('[AudioQueue] enqueue error:', err)
+        return ''
+      }
+    })()
+
+    this.pendingFetches.push(fetchPromise)
+    fetchPromise.then(async () => {
+      // 等前面所有 fetch 完了再入队（保证顺序）
+      while (this.pendingFetches[0] !== fetchPromise) {
+        await new Promise(r => setTimeout(r, 5))
+      }
+      this.pendingFetches.shift()
+      const url = await fetchPromise
+      if (url) {
+        this.queue.push(url)
+        if (!this.isPlaying) this.playNext()
+      }
+    })
+  }
+
+  // 播放下一段
+  private playNext(): void {
+    if (this.queue.length === 0) {
+      this.isPlaying = false
+      this.onQueueEmpty?.()
+      this.onSpeakingChange?.(false)
+      return
+    }
+
+    this.isPlaying = true
+    this.onSpeakingChange?.(true)
+
+    const url = this.queue.shift()!
+    this.currentAudio = new Audio(url)
+
+    this.currentAudio.onended = () => {
+      URL.revokeObjectURL(url)
+      this.currentAudio = null
+      // 微小延迟，让上一段完全结束
+      setTimeout(() => this.playNext(), 80)
+    }
+
+    this.currentAudio.onerror = () => {
+      URL.revokeObjectURL(url)
+      this.currentAudio = null
+      this.playNext()
+    }
+
+    this.currentAudio.play().catch(() => {
+      this.playNext()
+    })
+  }
+
+  // 打断：停止播放 + 清空队列
+  stop(): void {
+    if (this.currentAudio) {
+      this.currentAudio.pause()
+      this.currentAudio.src = ''
+      this.currentAudio = null
+    }
+
+    // 释放队列中所有 URL
+    this.queue.forEach(url => URL.revokeObjectURL(url))
+    this.queue = []
+    this.pendingFetches = [] // ⭐ v4.0：清掉待合成队列
+    this.isPlaying = false
+    this.onSpeakingChange?.(false)
+  }
+
+  // 是否正在播放
+  isSpeaking(): boolean {
+    return this.isPlaying
+  }
+
+  // 队列是否为空
+  isEmpty(): boolean {
+    return this.queue.length === 0 && !this.isPlaying
+  }
+
+  // 设置回调
+  setOnQueueEmpty(fn: () => void): void {
+    this.onQueueEmpty = fn
+  }
+
+  setOnSpeakingChange(fn: (speaking: boolean) => void): void {
+    this.onSpeakingChange = fn
+  }
+}
+
+// 全局单例
+const globalAudioQueue = new AudioQueueManager()
+
+// 供外部使用的打断函数
+export function stopAllAudio(): void {
+  globalAudioQueue.stop()
+}
+
+export function isAudioSpeaking(): boolean {
+  return globalAudioQueue.isSpeaking()
+}
+
+//播放TTS（单次，不排队）
+export async function playTTSOnce(text: string): Promise<void> {
+  return globalAudioQueue.enqueue(text)
+}
+
+// 播放并等待完成（用于单条消息播放）
+export async function playTTSAndWait(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    globalAudioQueue.setOnQueueEmpty(() => resolve())
+    globalAudioQueue.enqueue(text)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Web Speech API（语音输入）
+// ---------------------------------------------------------------------------
+export function isSpeechRecognitionSupported(): boolean {
+  return typeof window !== 'undefined' && (
+    'SpeechRecognition' in window || 'webkitSpeechRecognition' in window
+  )
+}
+
+export function createSpeechRecognition(): SpeechRecognition | null {
+  if (!isSpeechRecognitionSupported()) return null
+  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  if (!SR) return null
+  const recognition = new SR()
+  // v2.0 (2026-06-30 奕霖反馈)：改为连续模式 + 自己的 silence 检测
+  // 之前 continuous=false 默认几秒没声音就停，说话停顿会被误判为结束
+  recognition.continuous = true
+  recognition.interimResults = true
+  recognition.lang = 'zh-CN'
+  recognition.maxAlternatives = 1
+  return recognition as SpeechRecognition
+}
+
+/** Silence 检测阈值（毫秒）—— 超过这个时间没有声音就认为结束
+ * 奕霖 2026-06-30 18:49 反馈：1.5s 太短，说话正常停顿会被结束 → 改为 5s
+ * 奕霖 2026-06-30 19:11 反馈：5s 还是太短，说话有停顿会误判 → 改为 8s
+ */
+export const SILENCE_TIMEOUT_MS = 8000
+
+export function onSpeechResult(
+  callback: SpeechCallback,
+  onError: ErrorCallback
+): () => void {
+  const recognition = createSpeechRecognition()
+  if (!recognition) {
+    onError('您的浏览器不支持语音输入')
+    return () => {}
+  }
+
+  let silenceTimer: ReturnType<typeof setTimeout> | null = null
+  let lastTranscript = ''
+  let lastActivityAt = Date.now()
+
+  // 清除 silence timer
+  const clearSilenceTimer = () => {
+    if (silenceTimer) {
+      clearTimeout(silenceTimer)
+      silenceTimer = null
+    }
+  }
+
+  // 启动 silence 检测
+  const startSilenceTimer = () => {
+    clearSilenceTimer()
+    silenceTimer = setTimeout(() => {
+      // 超过阈值没声音，主动 stop 让外部拿到结果
+      try {
+        recognition.stop()
+      } catch {}
+    }, SILENCE_TIMEOUT_MS)
+  }
+
+  recognition.onresult = (event: SpeechRecognitionEvent) => {
+    lastActivityAt = Date.now()
+    let finalTranscript = ''
+    let interimTranscript = ''
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i]
+      if (result.isFinal) {
+        finalTranscript += result[0].transcript
+      } else {
+        interimTranscript += result[0].transcript
+      }
+    }
+
+    const transcript = finalTranscript || interimTranscript
+    if (transcript) {
+      lastTranscript = transcript
+      // 收到结果就重置 silence timer
+      startSilenceTimer()
+    }
+
+    callback({
+      transcript,
+      isFinal: !!finalTranscript,
+    })
+  }
+
+  recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    if (event.error === 'no-speech') {
+      // 没声音不算错
+      return
+    }
+    if (event.error === 'aborted') {
+      // 我们主动 stop 触发的
+      return
+    }
+    onError(event.error)
+  }
+
+  recognition.onend = () => {
+    clearSilenceTimer()
+    // onend 触发时如果有 transcript， 以 final 形式回调一次
+    if (lastTranscript) {
+      callback({ transcript: lastTranscript, isFinal: true })
+    }
+  }
+
+  (recognition as any).onstart = () => {
+    startSilenceTimer()
+  }
+
+  recognition.start()
+
+  return () => {
+    clearSilenceTimer()
+    try {
+      recognition.stop()
+    } catch {}
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 流式TTS播放（逐段接收并播放）
+// ---------------------------------------------------------------------------
+export interface StreamingTTSOptions {
+  onChunk?: (text: string) => void
+  onDone?: () => void
+  onError?: (err: string) => void
+  onSpeakingChange?: (speaking: boolean) => void
+}
+
+/**
+ * 清洗文本中的 markdown / 符号，避免 TTS 读出 # * _ 等
+ * - 去除 # * _ ~ ` > < [ ] ( ) | 等 markdown 符号
+ * - 保留中文、英文、数字、常见标点
+ * - 合并多余空白
+ *
+ * ⭐ 2026-07-13 13:15 奕霖：TTS 读取货码会说成"九十二万二千三百一十六"
+ * - 在"取货码"后面遇到纯数字串时，逐位拆开（9 2 2 3 1 6）防止被读成连号 + 万/千单位
+ */
+export function cleanTextForTTS(text: string): string {
+  if (!text) return ''
+  // ⭐ 先处理"取货码 XXXXXX"这种：后面跟 4 位以上纯数字串时插空格逐位念
+  // 例：取货码 922316 → 取货码 9 2 2 3 1 6
+  // 例：取货码是 734144 → 取货码是 7 3 4 1 4 4
+  // 例：取货码：215682 → 取货码：2 1 5 6 8 2
+  const spaced = text.replace(
+    /(取货码[是为]?[　\s]*[：:]?[　\s]*)(\d{4,8})(?!\d)/g,
+    (_, prefix, digits) => prefix + digits.split('').join(' ')
+  )
+  return spaced
+    // 去除 markdown 标题/列表/引用等符号
+    .replace(/[#{}\[\]<>|*_~`>]+/g, ' ')
+    // 去除 url 括号
+    .replace(/https?:\/\/\S+/g, '链接')
+    // 去除 emoji (4字节字符)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+    // 合并多余空白
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * 播放流式TTS（边接收边播放）
+ * @param textChunk 从SSE流收到的文字片段
+ */
+export async function playStreamingTTS(textChunk: string): Promise<void> {
+  const cleaned = cleanTextForTTS(textChunk)
+  if (!cleaned) return
+  return globalAudioQueue.enqueue(cleaned)
+}
+
+/**
+ * 流式TTS状态回调
+ */
+export type StreamingTTSCallbacks = {
+  onSpeakingChange?: (speaking: boolean) => void
+  onStart?: () => void
+  onEnd?: () => void
+  onSentence?: (sentence: string) => void
+  onComplete?: () => void
+}
+
+export function setStreamingCallbacks(callbacks: StreamingTTSCallbacks): void {
+  if (callbacks.onSpeakingChange) globalAudioQueue.setOnSpeakingChange(callbacks.onSpeakingChange)
+  if (callbacks.onStart) (globalAudioQueue as any).setOnStart?.(callbacks.onStart)
+  if (callbacks.onEnd) (globalAudioQueue as any).setOnEnd?.(callbacks.onEnd)
+  if (callbacks.onSentence) (globalAudioQueue as any).setOnSentence?.(callbacks.onSentence)
+  if (callbacks.onComplete) (globalAudioQueue as any).setOnComplete?.(callbacks.onComplete)
+}
+
+// ---------------------------------------------------------------------------
+// 单条消息TTS播放（兼容旧接口）
+// v2.0 (2026-06-30): 改走 AudioQueueManager 统一管理，修复自动+点击播报冲突
+// ---------------------------------------------------------------------------
+export async function playTTS(text: string, onEnd?: () => void): Promise<void> {
+  const cleaned = cleanTextForTTS(text)
+  if (!cleaned) {
+    onEnd?.()
+    return
+  }
+  // ⭐ 走队列，stopAllAudio 就能打断
+  globalAudioQueue.enqueue(cleaned)
+  if (onEnd) {
+    const check = setInterval(() => {
+      if (globalAudioQueue.isEmpty()) {
+        clearInterval(check)
+        onEnd()
+      }
+    }, 200)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ChatMessage 组件用的播放函数
+// v2.0 (2026-06-30): 改走 AudioQueueManager，stopAllAudio 可统一打断
+// ---------------------------------------------------------------------------
+export async function playMessageAudio(
+  message: Message,
+  onStart?: () => void,
+  onEnd?: () => void
+): Promise<() => void> {
+  const cleaned = cleanTextForTTS(message.content)
+  if (!cleaned) {
+    onEnd?.()
+    return () => {}
+  }
+
+  // ⭐ 走队列 + 缓存（同一消息不重复生成）
+  onStart?.()
+  globalAudioQueue.enqueue(cleaned)
+
+  if (onEnd) {
+    const check = setInterval(() => {
+      if (globalAudioQueue.isEmpty()) {
+        clearInterval(check)
+        onEnd()
+      }
+    }, 200)
+  }
+
+  // 返回停止函数
+  const stopFn = () => {
+    globalAudioQueue.stop()
+    // ⭐ 立即触发 onEnd（2026-06-30 21:05 奕霖反馈暂停键不灵）
+    if (onEnd) {
+      const check = setInterval(() => {
+        if (globalAudioQueue.isEmpty()) {
+          clearInterval(check)
+        }
+      }, 50) // 加速 50ms 检查
+    }
+  }
+  // 同时提供一个 stopNotifier，调用后立即调 onEnd（不等轮询）
+  return () => {
+    globalAudioQueue.stop()
+    if (onEnd) {
+      onEnd()
+    }
+  }
+}

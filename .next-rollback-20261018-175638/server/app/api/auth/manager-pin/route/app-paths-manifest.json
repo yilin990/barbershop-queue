@@ -1,0 +1,3 @@
+{
+  "/api/auth/manager-pin/route": "app/api/auth/manager-pin/route.js"
+}

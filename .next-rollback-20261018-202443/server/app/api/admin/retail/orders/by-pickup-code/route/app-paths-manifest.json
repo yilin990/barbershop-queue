@@ -1,0 +1,3 @@
+{
+  "/api/admin/retail/orders/by-pickup-code/route": "app/api/admin/retail/orders/by-pickup-code/route.js"
+}

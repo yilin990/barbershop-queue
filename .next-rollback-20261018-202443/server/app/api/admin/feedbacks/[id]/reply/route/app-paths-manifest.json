@@ -1,0 +1,3 @@
+{
+  "/api/admin/feedbacks/[id]/reply/route": "app/api/admin/feedbacks/[id]/reply/route.js"
+}

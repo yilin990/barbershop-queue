@@ -1,0 +1,3 @@
+{
+  "/api/admin/products/identify-by-image/route": "app/api/admin/products/identify-by-image/route.js"
+}
