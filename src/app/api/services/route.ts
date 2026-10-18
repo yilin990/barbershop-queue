@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   // 2026-10-16 清禾：管理侧写操作需店员/管理员身份（同源 cookie 自动带，后台页面无需改）
-  const guard = requireStaffOrAdmin(request)
+  const guard = await requireStaffOrAdmin(request)
   if (!guard.ok) return guardFail(guard)
   try {
     const body = await request.json()
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
 //   店长自己会调价（剪发 58 → 68），这种事一天可能好几回，不能老等人。
 export async function PATCH(request: NextRequest) {
   // 2026-10-16 清禾：管理侧写操作需店员/管理员身份（同源 cookie 自动带，后台页面无需改）
-  const guard = requireStaffOrAdmin(request)
+  const guard = await requireStaffOrAdmin(request)
   if (!guard.ok) return guardFail(guard)
   try {
     const body = await request.json()

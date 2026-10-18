@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50')
 
     // 3) 店员/管理员优先：业务上需要查任意顾客
-    const guard = requireStaffOrAdmin(request)
+    const guard = await requireStaffOrAdmin(request)
 
     let phone: string
     if (guard.ok) {

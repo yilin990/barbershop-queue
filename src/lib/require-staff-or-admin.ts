@@ -22,6 +22,7 @@ import { NextRequest } from 'next/server'
 import { verifyStaffCookie } from './staff-auth'
 import { extractToken, verifyToken } from './jwt'
 import { parseCookie } from './cookie'
+import { prisma } from './db'
 
 const MANAGER_ROLES = ['店长']
 
@@ -39,7 +40,7 @@ export interface GuardResult {
   status?: number
 }
 
-export function requireStaffOrAdmin(request: NextRequest): GuardResult {
+export async function requireStaffOrAdmin(request: NextRequest): Promise<GuardResult> {
   const cookieHeader = request.headers.get('cookie') || ''
 
   // ① 店员 PIN 会话
@@ -55,8 +56,25 @@ export function requireStaffOrAdmin(request: NextRequest): GuardResult {
   }
 
   // ③ 店长 JWT（zhilin-token）
+  //   [2026-10-18 清禾修] 原来只验 JWT 签名，等于【任何登录顾客】都被当成店长：
+  //   实测顾客 role=chronic 的 token 也能拿到 level='manager'，
+  //   于是 /api/orders 的「店员可查任意 phone」分支对所有人敞开。
+  //   改成与 requireManager 一致：以 DB 实时 role 为准。
   const mgr = parseCookie(cookieHeader, 'zhilin-token')
-  if (mgr && verifyToken(mgr)) return { ok: true, level: 'manager' }
+  if (mgr) {
+    const payload = verifyToken(mgr)
+    const userId = String(payload?.userId || '').trim()
+    if (userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true },
+      })
+      const role = String(user?.role || '').trim()
+      if (user && MANAGER_ROLES.indexOf(role) !== -1) {
+        return { ok: true, level: 'manager' }
+      }
+    }
+  }
 
   return {
     ok: false,
