@@ -7,23 +7,96 @@
  * 业务逻辑全部在 @/domain/order/service
  */
 
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createOrder, getCustomerOrders } from '@/domain/order/service'
 import { errorResponse, successResponse } from '@/lib/error'
 import { enqueueFromOrder } from '@/lib/queue-sync'
+import { verifyToken, extractToken } from '@/lib/jwt'
+import { checkIpLimit, clientIp } from '@/lib/identity-auth'
+import { requireStaffOrAdmin } from '@/lib/require-staff-or-admin'
 
 export const runtime = 'nodejs'
 
-/** GET /api/orders?merchantCode=0005&phone=xxx&status=xxx&limit=50 */
+
+/** 手机号比对用归一化：去分隔符、去 +86 前缀。
+ *  只用于「你传的 phone 是否等于 JWT 里的 phone」这一处比对，
+ *  ⭐ 绝不用于查库 —— 查库一律用 JWT 原始值，避免格式不一致查不到单。 */
+function normalizeForCompare(raw: string): string {
+  const digits = String(raw || '').replace(/\D/g, '')
+  if (digits.length === 13 && digits.startsWith('86')) return digits.slice(2)
+  return digits
+}
+
+
+/** GET /api/orders?merchantCode=0005&phone=xxx&status=xxx&limit=50
+ *
+ * [加固 2026-10-18] 原为 IDOR：任意手机号可拉任意人订单。
+ *  1) IP 限流 checkIpLimit，挡脚本批量刷
+ *  2) 会员：验 zhilin-token JWT，只查本人；query 里的 phone 仅用于比对
+ *  3) 店员/管理员：requireStaffOrAdmin，可查任意 phone（业务需要）
+ *
+ *  兼容性：7 个前台页面（chat/groupbuy/retail/pickup/pharmacist/points 等）
+ *  都在登录态下调用且已带 zhilin-token cookie，故无需改动前端。
+ */
 export async function GET(request: NextRequest) {
   try {
+    // 1) IP 限流
+    const lim = checkIpLimit(`orders:get:${clientIp(request)}`, 30, 60_000)
+    if (!lim.ok) {
+      return NextResponse.json(
+        { success: false, error: `请求过于频繁，请 ${lim.retryAfter} 秒后重试` },
+        { status: 429 },
+      )
+    }
+
     const { searchParams } = new URL(request.url)
-    const phone = searchParams.get('phone')
+    const phoneParam = (searchParams.get('phone') || '').trim()
     const merchantCode = searchParams.get('merchantCode') || undefined
     const status = searchParams.get('status') || undefined
     const limit = parseInt(searchParams.get('limit') || '50')
 
-    const result = await getCustomerOrders({ phone: phone || '', merchantCode, status, limit })
+    // 3) 店员/管理员优先：业务上需要查任意顾客
+    const guard = requireStaffOrAdmin(request)
+
+    let phone: string
+    if (guard.ok) {
+      phone = phoneParam
+      if (!phone) {
+        return NextResponse.json(
+          { success: false, error: '缺少 phone 参数' },
+          { status: 400 },
+        )
+      }
+    } else {
+      // 2) 会员：JWT 里的 phone 才是唯一可信来源
+      const cookieToken = /(^|;\s*)zhilin-token=([^;]+)/.exec(
+        request.headers.get('cookie') || '',
+      )
+      const rawToken = (cookieToken
+        ? decodeURIComponent(cookieToken[2])
+        : null) || extractToken(request.headers.get('authorization'))
+      const payload = rawToken ? verifyToken(rawToken) : null
+
+      if (!payload?.phone) {
+        return NextResponse.json(
+          { success: false, error: '请先登录后再查看订单' },
+          { status: 401 },
+        )
+      }
+      // 你传的 phone 只能等于 JWT 里的，否则 403
+      if (
+        phoneParam &&
+        normalizeForCompare(phoneParam) !== normalizeForCompare(payload.phone)
+      ) {
+        return NextResponse.json(
+          { success: false, error: '只能查看本人订单' },
+          { status: 403 },
+        )
+      }
+      phone = payload.phone
+    }
+
+    const result = await getCustomerOrders({ phone, merchantCode, status, limit })
     return successResponse(result)
   } catch (e) {
     return errorResponse(e)
