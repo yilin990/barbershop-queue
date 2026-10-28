@@ -19,6 +19,9 @@ import { NextRequest } from 'next/server'
 import Database from 'better-sqlite3'
 import { getDb as getMemberDb, consume, centsToYuan, DB_PATH } from '@/lib/member'
 import { pushToPhone } from '@/lib/webpush-server'
+// ⭐ 2026-10-28 鉴权加固
+import { requireShopSide, requireManagerSide, guardFail } from '@/lib/api-auth'
+import { checkIpLimit, clientIp } from '@/lib/identity-auth'
 
 export const runtime = 'nodejs'
 
@@ -31,6 +34,11 @@ export async function GET(request: NextRequest) {
     const merchantId = (searchParams.get('merchantId') || '').trim()
     if (!merchantId) throw new Error('merchantId 必填')
     const limit = Math.min(200, Number(searchParams.get('limit')) || 50)
+
+    // ⭐ 2026-10-28：结算流水含顾客手机号/姓名/金额 → 只能店员/店长/管理员看，
+    //   且只能看自己业务线下的商户（跨商户 → 403）。
+    const guard = await requireShopSide(request, merchantId)
+    if (!guard.ok) return guardFail(guard)
 
     db = new Database(DB_PATH)
     const rows = db
@@ -74,9 +82,23 @@ export async function POST(request: NextRequest) {
   let db: any = null
   let card: any = null
   try {
+    // ⭐ 2026-10-28 鉴权加固（这是资金接口，最高危）：
+    //   原来**零鉴权**：任何人 POST 任意 phone + 任意金额 + payMethod=card
+    //   → 直接扣掉别人会员卡余额 = 免单/盗扣通道。
+    //   现在：必须店长/管理员 + 商户范围；且限流。
+    const lim = checkIpLimit(`settlements:post:${clientIp(request)}`, 30, 60_000)
+    if (!lim.ok) {
+      return Response.json(
+        { ok: false, error: `结算过于频繁，请 ${lim.retryAfter} 秒后重试` },
+        { status: 429 },
+      )
+    }
     const b = await request.json()
     const merchantId = String(b.merchantId || '').trim()
     if (!merchantId) throw new Error('merchantId 必填')
+
+    const guard = await requireManagerSide(request, merchantId)
+    if (!guard.ok) return guardFail(guard)
 
     const phone = String(b.phone || '').replace(/[^\d]/g, '')
     if (!/^1\d{10}$/.test(phone)) throw new Error('手机号格式不对')

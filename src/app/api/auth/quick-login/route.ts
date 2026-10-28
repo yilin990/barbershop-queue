@@ -20,7 +20,7 @@ import { NextRequest } from 'next/server'
 import { createHash } from 'crypto'
 import { signToken } from '@/lib/jwt'
 import { prisma } from '@/lib/db'
-import { parseCookie, buildSetCookie } from '@/lib/cookie'
+import { parseCookie, buildSetCookie, cookieSecure } from '@/lib/cookie'
 import { errorResponse, successResponse, AuthError } from '@/lib/error'
 
 export const runtime = 'nodejs'
@@ -85,8 +85,10 @@ export async function POST(request: NextRequest) {
       maxAge: 30 * 24 * 3600,
       path: '/',
       sameSite: 'lax',
-      httpOnly: false,
-      secure: false,
+      // ⭐ 2026-10-28 加固：httpOnly（XSS 读不到）+ Secure（不走明文 HTTP）
+      //   客户端要拿 token 走 GET /api/auth/session（服务端读 cookie）。
+      httpOnly: true,
+      secure: cookieSecure(request),
     }))
     response.headers.append('Set-Cookie', buildSetCookie('zhilin-user-id', user.id, {
       maxAge: 30 * 24 * 3600,

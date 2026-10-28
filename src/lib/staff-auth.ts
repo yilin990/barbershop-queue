@@ -18,26 +18,27 @@
  *   - 操作审计日志
  */
 
-import { BUSINESS_CONFIG } from '@/config/business.config'
-import { verifyPinHashes } from './pin-hash'
+// ⭐ 本文件会被客户端组件 import —— **不能** import 任何服务端模块
+//   （staff-session.ts → business.secrets → PIN 哈希，会被打进浏览器包）。
+//   所以 cookie 名字在这里本地定义一份（纯字符串，无密钥）。
+const STAFF_COOKIE_KEY = 'zhilin-staff-session'
+const STAFF_OK_COOKIE = 'zhilin-staff-ok'
 
-// 从 config 读 PIN 列表（生产环境可改 .env.local）
-const STAFF_PIN_HASHES: readonly string[] = (BUSINESS_CONFIG as any).staffPinHashes || []
-const PIN_PEPPER: string = (BUSINESS_CONFIG as any).pinPepper || ''
+// ⭐ 2026-10-28：本文件会被客户端组件（StaffGate.tsx）import，
+//   所以这里**不能**再 import 任何带密钥的模块（config/business.secrets）。
+//   验 PIN 的逻辑搬到服务端专用文件：
+//     · verifyStaffPin    → src/lib/staff-pin.ts
+//     · verifyStaffCookie → src/lib/staff-session.ts
+//   否则 6 位 PIN 的哈希会被打进浏览器包，可离线爆破。
 
 const STORAGE_KEY = 'zhilin_staff_auth'
-export const STAFF_COOKIE_KEY = 'zhilin-staff-session'
+export { STAFF_COOKIE_KEY }
 const SESSION_TTL_MS = 60 * 60 * 1000 // 1 小时
 
 interface StaffSession {
   pin: string
   loginAt: number
   expiresAt: number
-}
-
-/** 验证 PIN 是否有效 */
-export function verifyStaffPin(pin: string): boolean {
-  return verifyPinHashes(pin, STAFF_PIN_HASHES, PIN_PEPPER)
 }
 
 /** 存 session */
@@ -87,29 +88,21 @@ export function clearStaffSession(): void {
   document.cookie = `${STAFF_COOKIE_KEY}=; path=/; max-age=0`
 }
 
+/* ⚠️ 服务端验证 staff cookie 请直接 import { verifyStaffCookie } from '@/lib/staff-session'。
+   这里**故意不再导出** —— 本文件会被客户端组件 import，
+   转出等于把密钥材料拖进前端包。 */
+
+
 /**
- * 服务端验证 staff cookie（2026-07-14 补）
- * 仅在 Node.js 环境调用（用于 API route）
+ * 是否存在「已解锁」标记 cookie（zhilin-staff-ok）。
+ *
+ * ⭐ 2026-10-28：真正的会话 cookie 是 httpOnly，浏览器 JS 读不到，
+ *   所以服务端额外下发一个**不含任何密钥**的标记 cookie 给 UI 判断用。
  */
-export function verifyStaffCookie(cookieHeader: string): { success: boolean; pin?: string; error?: string } {
-  // ⭐ MEMORY §304 v0.8.44 (2026-08-29 13:08 奕霖) — 加回 PIN 验证:
-  // v0.8.43 砍 StaffGate + verifyStaffCookie 接受 user JWT,任何登录用户都能进收银台
-  // v0.8.44 还原:只接受 staff-session cookie(从 StaffGate 输 PIN 获得)
-  // 效果:从 /me 进 /retail 必须先输 PIN(StaffGate 弹窗)→ 1 关验证
-  const match = cookieHeader.split(';').map(s => s.trim()).find(s => s.startsWith(`${STAFF_COOKIE_KEY}=`))
-  if (!match) return { success: false, error: '未携带店员会话' }
-  try {
-    const raw = match.split('=')[1]
-    const decoded = decodeURIComponent(raw)
-    const session = JSON.parse(decoded) as { pin: string; expiresAt: number }
-    if (!session?.pin || !session?.expiresAt) return { success: false, error: '会话格式错误' }
-    if (Date.now() > session.expiresAt) return { success: false, error: '会话已过期' }
-    if (!verifyPinHashes(session.pin, STAFF_PIN_HASHES, PIN_PEPPER))
-      return { success: false, error: 'PIN 不在白名单' }
-    return { success: true, pin: session.pin }
-  } catch {
-    return { success: false, error: '会话解析失败' }
-  }
+export function hasStaffMarker(): boolean {
+  if (typeof document === 'undefined') return false
+  const m = document.cookie.match(new RegExp(`(^| )${STAFF_OK_COOKIE}=([^;]+)`))
+  return !!m
 }
 
 /** 剩余时间（分钟） */

@@ -21,6 +21,8 @@ import { NextRequest } from 'next/server'
 import Database from 'better-sqlite3'
 import { errorResponse, successResponse } from '@/lib/error'
 import { resolveDbPath } from '../../../../lib/db-path'
+// ⭐ 2026-10-28：活动流含顾客姓名（到店/开始/完成），属于门店经营数据 → 要门店侧身份
+import { requireShopSide, guardFail } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -72,6 +74,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const merchantId = (searchParams.get('merchantId') || '').trim()
     if (!merchantId) return errorResponse(new Error('merchantId 必填'), 400)
+
+    const guard = await requireShopSide(request, merchantId)
+    if (!guard.ok) return guardFail(guard)
 
     const db = getDb()
     // ⭐ 2026-10-05 12:01 v1.1.20 奕霖立：取最近 24h 活动，按 updatedAt 倒序

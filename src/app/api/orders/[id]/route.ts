@@ -7,6 +7,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+// ⭐ 2026-10-28 鉴权加固：原来 GET/PATCH 都零鉴权 ——
+//   GET  /api/orders/{id} 匿名可读（手机号 + 取货码）
+//   PATCH /api/orders/{id} 匿名可改状态（零售单甚至不校验手机号）
+import { requireSelfOrShop, requireShopSide, guardFail, resolveIdentity, samePhone } from '@/lib/api-auth'
 
 
 // v1.1.32 (2026-10-06 19:11 qinghe fix Bug 4): barber orders live in TWO tables.
@@ -88,6 +92,13 @@ export async function GET(
     }
     const order = orderRows[0]
 
+    // ⭐ 2026-10-28：订单详情含手机号 + 取货码 → 只能本人或门店侧看
+    const orderPhone = String((order as any).deliveryPhone || '')
+    const guard = await requireSelfOrShop(request, orderPhone, (order as any).merchantId || null)
+    if (!guard.ok) {
+      return NextResponse.json({ success: false, error: guard.error }, { status: guard.status })
+    }
+
     const items = await prisma.$queryRaw<any[]>`
       SELECT * FROM OrderItem WHERE orderId = ${id} ORDER BY id ASC
     `
@@ -132,6 +143,34 @@ export async function PATCH(
       if (body.customerPhone !== queueRow.customerPhone) {
         return NextResponse.json({ success: false, error: '无权取消他人预约（手机号不匹配）' }, { status: 403 })
       }
+    }
+
+    // ⭐ 2026-10-28：取消/状态推进必须能证明身份。
+    //   顾客侧（cancel / delivered 确认收货）→ 登录态 phone 必须等于订单手机号
+    //   门店侧（paid / preparing / ready …）→ 店员/店长/管理员
+    const orderRowsForAuth = await prisma.$queryRaw<any[]>`
+      SELECT id, deliveryPhone, merchantId, status FROM "Order" WHERE id = ${orderId} LIMIT 1
+    `
+    const authOrder = orderRowsForAuth[0] || null
+    if (!authOrder) {
+      return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 })
+    }
+    const identity = await resolveIdentity(request)
+    const customerStates = ['cancelled', 'delivered', 'refunded']
+    if (!identity) {
+      return NextResponse.json({ success: false, error: '请先登录后再操作订单' }, { status: 401 })
+    }
+    const orderPhone = String(queueRow?.customerPhone || authOrder.deliveryPhone || body.customerPhone || '')
+    if (identity.isShopSide) {
+      const shopGuard = await requireShopSide(request, authOrder.merchantId || null)
+      if (!shopGuard.ok) return guardFail(shopGuard)
+    } else if (customerStates.indexOf(String(status)) !== -1) {
+      if (!samePhone(identity.phone, orderPhone)) {
+        return NextResponse.json({ success: false, error: '只能操作本人的订单' }, { status: 403 })
+      }
+    } else {
+      // 非顾客可改的状态（paid/preparing/ready）→ 必须门店侧
+      return NextResponse.json({ success: false, error: '需要店员权限' }, { status: 403 })
     }
 
     if (!status) {

@@ -19,12 +19,14 @@
  */
 
 import { NextRequest } from 'next/server'
-import { verifyStaffCookie } from './staff-auth'
+import { verifyStaffCookie } from './staff-session'
 import { extractToken, verifyToken } from './jwt'
 import { parseCookie } from './cookie'
 import { prisma } from './db'
 
 const MANAGER_ROLES = ['店长']
+/** 管理员家族 role（JWT 里带这些 role 才算管理侧） */
+const ADMIN_ROLES = ['admin', 'merchant', 'manager']
 
 /** 管理员家族 cookie（与 src/middleware.ts 的 ADMIN_TOKEN_COOKIES 保持一致） */
 const ADMIN_COOKIES = [
@@ -48,11 +50,20 @@ export async function requireStaffOrAdmin(request: NextRequest): Promise<GuardRe
   if (staff.success) return { ok: true, level: 'staff' }
 
   // ② 管理员 JWT（cookie 或 Bearer 头）
+  //   ⭐ 2026-10-28 加固：必须带管理类 role。
+  //     原来只验签名 —— 任何登录顾客的 token（zhilin-token / 任意 JWT）都能当 admin 用，
+  //     等于「注册即后台」。攻击者只要自己写一个 cookie：
+  //     document.cookie = 'zhilin-admin-token=<我的顾客JWT>' 就能越权。
   const bearer = extractToken(request.headers.get('authorization'))
-  if (bearer && verifyToken(bearer)) return { ok: true, level: 'admin' }
+  if (bearer) {
+    const bp = verifyToken(bearer)
+    if (bp && ADMIN_ROLES.indexOf(String(bp.role || '')) !== -1) return { ok: true, level: 'admin' }
+  }
   for (const name of ADMIN_COOKIES) {
     const v = parseCookie(cookieHeader, name)
-    if (v && verifyToken(v)) return { ok: true, level: 'admin' }
+    if (!v) continue
+    const cp = verifyToken(v)
+    if (cp && ADMIN_ROLES.indexOf(String(cp.role || '')) !== -1) return { ok: true, level: 'admin' }
   }
 
   // ③ 店长 JWT（zhilin-token）

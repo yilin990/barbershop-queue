@@ -21,8 +21,11 @@ import {
 // v1.1.38: 余额变动推给顾客（复用叫号那套 Web Push）
 import { pushToPhone } from '@/lib/webpush-server'
 // v1.1.55 清禾：充值/扣款/调整/冻结 = 直接动钱，必须店长。
-// GET 保持开放 —— 顾客端 (me / my-card / 门店主页「我的会员」) 靠它查自己卡。
+// ⭐ 2026-10-28：GET 也不能再裸奔 —— 原来只要带 merchantId 就能匿名查任意人的
+//   会员卡余额 + 全部流水（实测 8592 字节含余额与流水）。
+//   现在：顾客只能查**自己手机号**的卡；店员/店长/管理员可以查（限自己业务线的商户）。
 import { requireManager } from '@/lib/require-manager'
+import { requireSelfOrShop, requireManagerSide, guardFail } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -36,6 +39,12 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const merchantId = assertMerchantId(searchParams.get('merchantId') || '')
     const phone = normalizePhone(decodeURIComponent(rawPhone))
+
+    // ⭐ 2026-10-28：本人 或 门店侧
+    const guard = await requireSelfOrShop(request, phone, merchantId)
+    if (!guard.ok) {
+      return Response.json({ ok: false, error: guard.error }, { status: guard.status })
+    }
 
     db = getDb()
     const card = getCard(db, merchantId, phone)
@@ -65,6 +74,13 @@ export async function POST(
     const merchantId = assertMerchantId(body.merchantId || '')
     const phone = normalizePhone(decodeURIComponent(rawPhone))
     const action = String(body.action || '')
+
+    // ⭐ 2026-10-28：动钱接口除了店长身份，还要卡商户范围
+    //   （店长只能动自己业务线下的卡，不能碰其它商户的储值卡）
+    const mgrGuard = await requireManagerSide(request, merchantId)
+    if (!mgrGuard.ok) {
+      return Response.json({ ok: false, error: mgrGuard.error }, { status: mgrGuard.status })
+    }
 
     db = getDb()
 

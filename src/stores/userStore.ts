@@ -47,7 +47,7 @@ interface UserState {
    *  - 用途：/merchant/queue 预约/取号提交成功后自动登录
    *  - 效果：/orders 等页面不再弹 LoginModal（认账同一用户）
    */
-  softLogin: (phone: string, name?: string) => void
+  softLogin: (phone: string, name?: string, queueId?: string) => void
   logout: () => void
   updateUser: (updates: Partial<User>) => void
   /** ⭐ 奕霖 2026-07-03：更新健康画像 */
@@ -72,21 +72,34 @@ export const useUserStore = create<UserState>()(
 
       login: (user: User, token: string) => {
         set({ user, token, isLoggedIn: true })
-        // ⭐ 奕霖 2026-07-05 修复登录失效：双写到 cookie 30 天
+        // ⭐ 2026-10-28：zhilin-token 改成 httpOnly 之后，前端**不能**再写这个 cookie
+        //   （document.cookie 看不见 httpOnly cookie；而且明文 token 落在 document.cookie
+        //    里 = XSS 可读）。服务端在登录响应里已经下发了 httpOnly cookie，
+        //   前端只保留 zhilin-user-id。
         if (typeof document !== 'undefined') {
           const maxAge = 30 * 24 * 3600
-          document.cookie = `zhilin-token=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAge}; SameSite=Lax`
           document.cookie = `zhilin-user-id=${encodeURIComponent(user.id)}; Path=/; Max-Age=${maxAge}; SameSite=Lax`
         }
       },
 
       // ⭐ 2026-10-05 01:25 奕霖立：软登录实现
-      softLogin: (phone: string, name?: string) => {
+      softLogin: (phone: string, name?: string, queueId?: string) => {
         const cleanPhone = (phone || '').replace(/\D/g, '')
         if (!cleanPhone) return
         const existing = get().user
+        // ⭐ 2026-10-28：软会话签发（重复登录也要换一份新的）
+        const mintSoftSession = () => {
+          if (!queueId || typeof document === 'undefined') return
+          fetch('/api/auth/soft-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ phone: cleanPhone, queueId }),
+          }).catch(() => {})
+        }
         // 已登录且手机号一致：只更新昵称（不覆盖已有 user 信息）
         if (existing && existing.phone === cleanPhone) {
+          mintSoftSession()
           if (name && name !== existing.nickname) {
             set({ user: { ...existing, nickname: name } })
           }
@@ -105,18 +118,21 @@ export const useUserStore = create<UserState>()(
           lastLoginAt: new Date().toISOString(),
         }
         set({ user: softUser, isLoggedIn: true })
-        // 软登录也写 cookie（user-id 一致性，避免 /api/orders server-side cookie check 失败）
+        // 软登录也写 cookie（user-id 一致性）
         if (typeof document !== 'undefined') {
           const maxAge = 30 * 24 * 3600
           document.cookie = `zhilin-user-id=${encodeURIComponent(softUser.id)}; Path=/; Max-Age=${maxAge}; SameSite=Lax`
         }
+        // ⭐ 2026-10-28：换一份服务端签发的「软会话」——
+        //   有了它，顾客才能读自己的排队/订单（GET /api/queues?phone= 现在要求登录态）。
+        //   凭证是刚建的那一单（queueId），别人光知道手机号拿不到。
+        mintSoftSession()
       },
 
       logout: () => {
         set({ user: null, token: null, isLoggedIn: false })
-        // 清掉 cookie
+        // 清 cookie：httpOnly 的那个只能由服务端清（/api/auth/logout 会置过期）
         if (typeof document !== 'undefined') {
-          document.cookie = 'zhilin-token=; Path=/; Max-Age=0; SameSite=Lax'
           document.cookie = 'zhilin-user-id=; Path=/; Max-Age=0; SameSite=Lax'
         }
         fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
@@ -127,27 +143,18 @@ export const useUserStore = create<UserState>()(
        * 任何页面 mount 时调用，如果有 cookie 没在 store 就恢复
        */
       restoreFromCookie: async () => {
-        if (typeof document === 'undefined') return
+        if (typeof window === 'undefined') return
         const { isLoggedIn, token } = get()
         // 如果 store 里已有 token，不重复
         if (isLoggedIn && token) return
-        // 读 cookie
-        const cookies = document.cookie.split(';').reduce((acc, c) => {
-          const [k, ...v] = c.trim().split('=')
-          acc[k] = decodeURIComponent(v.join('='))
-          return acc
-        }, {} as Record<string, string>)
-        const cookieToken = cookies['zhilin-token']
-        if (!cookieToken) return
-        // 用 cookie token 调后端验证 + 拿最新 user
+        // ⭐ 2026-10-28：zhilin-token 是 httpOnly 了，JS 读不到 cookie。
+        //   改成问服务端要（服务端读 cookie → 验签 → 回 token + user）。
         try {
-          const res = await fetch('/api/users/me', {
-            headers: { Authorization: `Bearer ${cookieToken}` },
-          })
+          const res = await fetch('/api/auth/session', { credentials: 'include' })
           const data = await res.json()
           if (data.success && data.user) {
             set({
-              token: cookieToken,
+              token: data.token,
               user: { ...(get().user || {}), ...data.user },
               isLoggedIn: true,
             })

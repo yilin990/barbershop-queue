@@ -13,7 +13,7 @@
 
 import { NextRequest } from 'next/server'
 import { getPickupInfo, redeemOrder } from '@/domain/order/service'
-import { verifyStaffCookie } from '@/lib/staff-auth'
+import { verifyStaffCookie } from '@/lib/staff-session'
 import { errorResponse, successResponse, AuthError } from '@/lib/error'
 
 export const runtime = 'nodejs'

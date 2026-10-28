@@ -14,6 +14,8 @@ import { enqueueFromOrder } from '@/lib/queue-sync'
 import { verifyToken, extractToken } from '@/lib/jwt'
 import { checkIpLimit, clientIp } from '@/lib/identity-auth'
 import { requireStaffOrAdmin } from '@/lib/require-staff-or-admin'
+// ⭐ 2026-10-28：软会话（预约后签发的 zhilin-soft-token）也要能查自己的订单
+import { resolveIdentity, samePhone } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -69,31 +71,44 @@ export async function GET(request: NextRequest) {
       }
     } else {
       // 2) 会员：JWT 里的 phone 才是唯一可信来源
-      const cookieToken = /(^|;\s*)zhilin-token=([^;]+)/.exec(
-        request.headers.get('cookie') || '',
-      )
-      const rawToken = (cookieToken
-        ? decodeURIComponent(cookieToken[2])
-        : null) || extractToken(request.headers.get('authorization'))
-      const payload = rawToken ? verifyToken(rawToken) : null
+      // ⭐ 2026-10-28：顾客端（扫码预约后）拿到的是软会话 cookie（zhilin-soft-token），
+      //   它同样绑定手机号，也应该能查自己的订单。
+      const identity = await resolveIdentity(request)
+      if (identity && identity.phone) {
+        if (phoneParam && !samePhone(phoneParam, identity.phone)) {
+          return NextResponse.json(
+            { success: false, error: '只能查看本人订单' },
+            { status: 403 },
+          )
+        }
+        phone = identity.phone
+      } else {
+        const cookieToken = /(^|;\s*)zhilin-token=([^;]+)/.exec(
+          request.headers.get('cookie') || '',
+        )
+        const rawToken = (cookieToken
+          ? decodeURIComponent(cookieToken[2])
+          : null) || extractToken(request.headers.get('authorization'))
+        const payload = rawToken ? verifyToken(rawToken) : null
 
-      if (!payload?.phone) {
-        return NextResponse.json(
-          { success: false, error: '请先登录后再查看订单' },
-          { status: 401 },
-        )
+        if (!payload?.phone) {
+          return NextResponse.json(
+            { success: false, error: '请先登录后再查看订单' },
+            { status: 401 },
+          )
+        }
+        // 你传的 phone 只能等于 JWT 里的，否则 403
+        if (
+          phoneParam &&
+          normalizeForCompare(phoneParam) !== normalizeForCompare(payload.phone)
+        ) {
+          return NextResponse.json(
+            { success: false, error: '只能查看本人订单' },
+            { status: 403 },
+          )
+        }
+        phone = payload.phone
       }
-      // 你传的 phone 只能等于 JWT 里的，否则 403
-      if (
-        phoneParam &&
-        normalizeForCompare(phoneParam) !== normalizeForCompare(payload.phone)
-      ) {
-        return NextResponse.json(
-          { success: false, error: '只能查看本人订单' },
-          { status: 403 },
-        )
-      }
-      phone = payload.phone
     }
 
     const result = await getCustomerOrders({ phone, merchantCode, status, limit })

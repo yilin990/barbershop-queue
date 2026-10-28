@@ -14,6 +14,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+// ⭐ 2026-10-28：原来 POST 直接用 body.userId —— 任何人都能冒用任意 userId 发评价。
+import { resolveIdentity, samePhone, requireSelfOrShop } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -28,17 +30,26 @@ interface CreateReviewInput {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as CreateReviewInput
-    const { orderId, userId, rating, content = '' } = body
+    const { orderId, rating, content = '' } = body
 
     if (!orderId) return NextResponse.json({ success: false, error: 'orderId 必填' }, { status: 400 })
-    if (!userId) return NextResponse.json({ success: false, error: 'userId 必填' }, { status: 400 })
     if (!rating || rating < 1 || rating > 5) {
       return NextResponse.json({ success: false, error: 'rating 必须在 1-5 之间' }, { status: 400 })
     }
 
+    // ⭐ 2026-10-28：必须登录，且只能给**自己的**订单评价
+    const identity = await resolveIdentity(request)
+    if (!identity) {
+      return NextResponse.json({ success: false, error: '请先登录后再评价' }, { status: 401 })
+    }
+    if (identity.level !== 'customer' || !identity.userId) {
+      return NextResponse.json({ success: false, error: '请先用手机号登录后再评价' }, { status: 401 })
+    }
+    const userId = identity.userId
+
     // 1. 查订单
     const orders = await prisma.$queryRaw<any[]>`
-      SELECT id, orderNo, status, customerId FROM "Order" WHERE id = ${orderId} LIMIT 1
+      SELECT id, orderNo, status, customerId, deliveryPhone FROM "Order" WHERE id = ${orderId} LIMIT 1
     `
     if (orders.length === 0) {
       return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 })
@@ -49,6 +60,10 @@ export async function POST(request: NextRequest) {
         { success: false, error: '订单未核销完成，不能评价' },
         { status: 400 }
       )
+    }
+    // 只有订单本人能评价
+    if (!samePhone(identity.phone, order.deliveryPhone)) {
+      return NextResponse.json({ success: false, error: '只能评价自己的订单' }, { status: 403 })
     }
 
     // 2. 检查是否已评价
@@ -94,6 +109,19 @@ export async function GET(request: NextRequest) {
 
     if (!orderId) {
       return NextResponse.json({ success: false, error: 'orderId 必填' }, { status: 400 })
+    }
+
+    // ⭐ 2026-10-28：评价里带顾客昵称/头像 → 只允许订单本人或门店侧查看
+    const orderRows = await prisma.$queryRaw<any[]>`
+      SELECT id, deliveryPhone, merchantId FROM "Order" WHERE id = ${orderId} LIMIT 1
+    `
+    const order = orderRows[0] || null
+    if (!order) {
+      return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 })
+    }
+    const guard = await requireSelfOrShop(request, String(order.deliveryPhone || ''), order.merchantId || null)
+    if (!guard.ok) {
+      return NextResponse.json({ success: false, error: guard.error }, { status: guard.status })
     }
 
     const reviews = await prisma.$queryRaw<any[]>`

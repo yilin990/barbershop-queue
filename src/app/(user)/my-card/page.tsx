@@ -72,7 +72,7 @@ function Inner() {
 
   const [card, setCard] = useState<Card | null>(null)
   const [logs, setLogs] = useState<LogRow[]>([])
-  const [state, setState] = useState<'idle' | 'loading' | 'none' | 'ready' | 'bad'>('idle')
+  const [state, setState] = useState<'idle' | 'loading' | 'none' | 'ready' | 'bad' | 'unauth'>('idle')
   const [input, setInput] = useState(phone)
   // v1.1.39 订单记录：预约 / 现场取号 也要能看到
   const [orders, setOrders] = useState<any[]>([])
@@ -120,13 +120,20 @@ function Inner() {
     setState('loading')
     try {
       const r = await fetch(
-        '/api/members/' + encodeURIComponent(p) + '?merchantId=' + merchantId
+        '/api/members/' + encodeURIComponent(p) + '?merchantId=' + merchantId,
+        { credentials: 'include' }
       )
       const j = await r.json()
+      // ⭐ 2026-10-28：会员卡余额属于敏感数据，接口现在要求「本人登录态」
+      //   （原来只要知道手机号就能匿名查余额 + 流水）。
+      if (r.status === 401 || r.status === 403) {
+        setCard(null); setState('unauth'); return
+      }
       if (j.ok) {
         setCard(j.card); setLogs(j.logs || []); setState('ready')
-        // 顺带拉订单记录（按手机号过滤）
-        fetch('/api/queues?merchantId=' + merchantId, { cache: 'no-store' })
+        // 顺带拉自己的排队记录
+        // ⭐ 2026-10-28：改成按手机号拉自己的（原来拉整个门店的队列再前端过滤 = 全店数据漏到浏览器）
+        fetch('/api/queues?phone=' + encodeURIComponent(p), { cache: 'no-store', credentials: 'include' })
           .then(r => r.json())
           .then(q => {
             if (q.success && Array.isArray(q.queues))
@@ -171,6 +178,19 @@ function Inner() {
 
       {state === 'bad' && (
         <div style={S.hint}>手机号格式不对，要 11 位数字</div>
+      )}
+
+      {state === 'unauth' && (
+        <div style={S.box}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>请先登录再查卡</div>
+          <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.6 }}>
+            会员卡余额属于个人隐私，{/* ⭐ 2026-10-28：接口改为「本人登录态」才返回 */}
+            现在只有用该手机号登录（或刚在本店预约过的会话）才能查看。
+            <br />
+            预约/取号成功后会自动登录；否则请用手机号验证码登录后再打开本页。
+          </div>
+        </div>
       )}
 
       {state === 'none' && (

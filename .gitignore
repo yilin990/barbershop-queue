@@ -102,3 +102,6 @@ data/manager-pin.json
 .next.rollback-*/
 .next-build-*/
 *.tsbuildinfo
+
+# 2026-10-28 鉴权加固隔离构建目录
+.next-authfix/

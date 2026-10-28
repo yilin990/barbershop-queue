@@ -1,54 +1,45 @@
 /**
- * 商户后台 PIN 验证（奕霖 2026-07-08 22:27）
+ * 商户后台 PIN 会话（客户端安全的部分）· 2026-10-28 加固
  *
- * 跟店员 PIN 分离：
- * - 店员 PIN（staffPinHashes，比对哈希） → 核销取货码
- * - 商户后台 PIN（adminPinHashes，比对哈希） → 进 /admin 管理
+ * ⚠️ 本文件会被客户端组件 import（AdminGate / AdminLayout / me/points 页），
+ *    所以这里**不能**再 import 任何带密钥的模块。
+ *    验 PIN 的判定搬到服务端：src/lib/admin-pin.ts + POST /api/admin/auth/admin-pin。
  *
- * 设计：
- * - 预设 3-4 个老板/店长 PIN（在 config 里）
- * - 输 PIN → 验证通过 → sessionStorage 存 1h
- * - 过期 → 重新输入
- * - 不跟用户登录 token 混（用户登录 ≠ 商户管理权限）
- *
- * 为什么单独一套：
- * - 店员是店内服务，PIN 给店长发
- * - 商户后台是经营数据 + 反馈处置，PIN 老板自己握着
- * - 一个是"做"，一个是"管"，**权限分离**
+ * 跟旧版的差别：
+ *   旧：verifyAdminPin(pin) 在浏览器里比对哈希 → 哈希被打进前端包 → 6 位 PIN 可离线爆破
+ *   新：浏览器只负责「提交 PIN」，服务端校验并下发 httpOnly 会话 cookie
  */
-
-import { BUSINESS_CONFIG } from '@/config/business.config'
-import { verifyPinHashes } from './pin-hash'
-
-// 从 config 读（生产环境可改 .env.local）
-// ⭐ 2026-10-12：明文 PIN 已移除（原值会被打进 .next/static 前端包）
-const ADMIN_PIN_HASHES: readonly string[] = (BUSINESS_CONFIG as any).adminPinHashes || []
-const PIN_PEPPER: string = (BUSINESS_CONFIG as any).pinPepper || ''
 
 const STORAGE_KEY = 'zhilin-admin-auth'
 const SESSION_TTL_MS = 60 * 60 * 1000 // 1 小时
 
+/** 客户端可见的「已解锁」标记（不含任何密钥，纯粹给 UI 用） */
+export const ADMIN_OK_COOKIE = 'zhilin-admin-ok'
+
 interface AdminSession {
-  pin: string
   loginAt: number
   expiresAt: number
 }
 
-export function verifyAdminPin(pin: string): boolean {
-  return verifyPinHashes(pin, ADMIN_PIN_HASHES, PIN_PEPPER)
-}
-
-export function setAdminSession(pin: string): void {
+/**
+ * 记录「后台已解锁」的本地状态。
+ *
+ * ⭐ 2026-10-28：**不再保存 PIN**。
+ *   旧版把明文 PIN 放进 sessionStorage（XSS 可读）；现在真正的凭证是服务端下发的
+ *   httpOnly cookie，这里只留时间戳，纯粹给 UI 用。
+ */
+export function setAdminSession(_pin?: string): void {
   if (typeof window === 'undefined') return
   const now = Date.now()
   const session: AdminSession = {
-    pin,
     loginAt: now,
     expiresAt: now + SESSION_TTL_MS,
   }
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session))
-  // 同步写 cookie，供服务端 API PATCH/POST 验证（不是 httpOnly，是同步标志）
-  document.cookie = `zhilin-admin-token=${encodeURIComponent('pin-' + pin)}; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}; SameSite=Lax`
+  // ⭐ 2026-10-28：不再由前端写 zhilin-admin-token（里面有明文 PIN，XSS 可读）。
+  //   真正的凭证由服务端 /api/admin/auth/admin-pin 以 httpOnly cookie 下发。
+  //   前端只写一个不含密钥的标记，给 UI 判断「已解锁」。
+  document.cookie = `${ADMIN_OK_COOKIE}=1; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}; SameSite=Lax`
 }
 
 export function getAdminSession(): AdminSession | null {
@@ -68,29 +59,25 @@ export function getAdminSession(): AdminSession | null {
   }
 }
 
+/**
+ * 是否已解锁（仅 UI 判断用）。
+ * ⭐ 真正的判定永远在服务端（httpOnly cookie + 每次请求复核）。
+ */
 export function isAdminAuthed(): boolean {
   if (typeof window === 'undefined') return false
   if (getAdminSession() !== null) return true
-  // cookie fallback: zhilin-admin-token=pin-XXXX
-  const m = document.cookie.match(/zhilin-admin-token=([^;]+)/)
-  if (m) {
-    const raw = decodeURIComponent(m[1])
-    if (raw.startsWith('pin-')) {
-      const pin = raw.slice(4)
-      if (verifyPinHashes(pin, ADMIN_PIN_HASHES, PIN_PEPPER)) return true
-    }
-  }
-  return false
+  const m = document.cookie.match(new RegExp(`(^| )${ADMIN_OK_COOKIE}=([^;]+)`))
+  return !!m
 }
 
 export function clearAdminSession(): void {
   if (typeof window === 'undefined') return
   sessionStorage.removeItem(STORAGE_KEY)
-  document.cookie = 'zhilin-admin-token=; Path=/; Max-Age=0'
+  document.cookie = `${ADMIN_OK_COOKIE}=; Path=/; Max-Age=0`
 }
 
 export function getAdminSessionRemainingMinutes(): number {
-  const session = getAdminSession()
-  if (!session) return 0
-  return Math.max(0, Math.floor((session.expiresAt - Date.now()) / 60000))
+  const s = getAdminSession()
+  if (!s) return 0
+  return Math.max(0, Math.floor((s.expiresAt - Date.now()) / 60000))
 }

@@ -21,6 +21,9 @@ import { generatePickupCode } from '@/lib/pickup-code'
 import Database from 'better-sqlite3'
 import path from 'path'
 import { resolveDbPath } from '../../../lib/db-path'
+// ⭐ 2026-10-28 统一鉴权（src/lib/api-auth.ts）
+import { requireSelfPhone, requireShopSide, guardFail } from '@/lib/api-auth'
+import { checkIpLimit, clientIp } from '@/lib/identity-auth'
 
 export const runtime = 'nodejs'
 
@@ -36,9 +39,16 @@ export async function GET(request: NextRequest) {
     const merchantId = (searchParams.get('merchantId') || '').trim()
     const phone = (searchParams.get('phone') || '').trim()
 
-    // ⭐ 2026-10-05 01:06 奕霖立：phone-only 查询（/orders 拉用户全部预约/取号）
-    // 当只有 phone 不带 merchantId 时，查该手机号在所有商户的 barber 记录
+    // ⭐ 2026-10-28 鉴权分叉（原来两条路都是零鉴权）：
+    //   ① phone-only（不带 merchantId）= 顾客查自己的排队单
+    //      → 必须登录态里的 phone == 请求里的 phone（店员/店长不受限）
+    //      → 原来的实现是「该手机号在所有商户的记录」= 跨商户枚举，直接泄露 PII
+    //   ② merchantId = 门店经营数据（排队看板，含顾客手机号/姓名/结算金额）
+    //      → 必须店员/店长/管理员，且只能读自己业务线下的商户
     if (phone && !merchantId) {
+      const guard = await requireSelfPhone(request, phone)
+      if (!guard.ok) return guardFail(guard)
+
       const db = getDb()
       const rows = db.prepare(`
         SELECT q.id, q.merchantId, q.orderNo, q.type, q.customerName, q.customerPhone,
@@ -57,6 +67,10 @@ export async function GET(request: NextRequest) {
     }
 
     if (!merchantId) return errorResponse(new Error('merchantId 必填'), 400)
+
+    // 门店经营数据：店员/店长/管理员 + 商户范围
+    const guard = await requireShopSide(request, merchantId)
+    if (!guard.ok) return guardFail(guard)
 
     // ⭐ 验证商户存在（多租户隔离）
     const merchant = await prisma.merchant.findUnique({ where: { id: merchantId }, select: { id: true } })
@@ -99,6 +113,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // ⭐ 2026-10-28：下单（预约/取号）**保持匿名** ——
+    //   这是「扫码进店、无需登录」的核心流程，锁了整店没法用。
+    //   但匿名不等于不限量：加 IP 限流，防止脚本灌单/刷爆门店看板。
+    const lim = checkIpLimit(`queues:post:${clientIp(request)}`, 20, 60_000)
+    if (!lim.ok) {
+      return Response.json(
+        { success: false, error: `提交过于频繁，请 ${lim.retryAfter} 秒后重试` },
+        { status: 429 },
+      )
+    }
     const body = await request.json()
     const merchantId = (body.merchantId || '').trim()
     if (!merchantId) return errorResponse(new Error('merchantId 必填'), 400)

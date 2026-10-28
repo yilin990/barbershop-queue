@@ -21,6 +21,31 @@ export interface CookieOptions {
 }
 
 /**
+ * 登录类 cookie 是否加 Secure。
+ *
+ * 默认加（生产走 https 代理，浏览器只在 https 下才发 Secure cookie）。
+ * 例外：局域网直连 http://<内网IP>:3070 调试时，Secure cookie 会被浏览器丢掉 →
+ * 这种情况用环境变量 COOKIE_SECURE=false 临时关掉。
+ * （localhost 例外：Chrome/Firefox 把 localhost 当安全上下文，Secure cookie 照常工作。）
+ */
+export function cookieSecure(req?: { headers: Headers; nextUrl?: { protocol?: string } } | null): boolean {
+  const v = (process.env.COOKIE_SECURE || '').trim().toLowerCase()
+  if (v === 'false' || v === '0' || v === 'off') return false
+  if (v === 'true' || v === '1' || v === 'on') return true
+  // 默认：按「本次请求是不是 https」决定。
+  //   为什么不能一律 true：理发店是「店内 Wi-Fi 直连 Mac」的场景（http://192.168.x.x:3070），
+  //   浏览器在 http 页面上一律丢弃 Secure cookie → 顾客登录态直接消失（比不加密还糟）。
+  //   走 cloudflared 的公网入口是 https → 自动加 Secure。
+  if (req) {
+    const proto = (req.headers?.get('x-forwarded-proto') || '').split(',')[0].trim()
+    if (proto) return proto === 'https'
+    const urlProto = req.nextUrl?.protocol
+    if (urlProto) return urlProto === 'https:'
+  }
+  return true
+}
+
+/**
  * 构造 Set-Cookie header value
  */
 export function buildSetCookie(

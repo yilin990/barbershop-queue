@@ -79,8 +79,18 @@ export function verifyAdminRequest(req: NextRequest): AdminAuthResult {
   //   奕霖 2026-08-03 21:00 反馈"订单没有数据"根因：staff cookie 名字 + 格式不匹配
   const staffSessionCookie = readCookie(req, 'zhilin-staff-session')
   if (staffSessionCookie) {
+    let raw = staffSessionCookie
+    try { raw = decodeURIComponent(staffSessionCookie) } catch { /* 原样 */ }
+    // ⭐ 2026-10-28 新形态：JWT(role=staff, 1h)（cookie 里不再放明文 PIN）
+    if (raw.split('.').length === 3) {
+      const payload = verifyToken(raw)
+      if (payload && String(payload.role || '') === 'staff') {
+        return { ok: true, via: 'jwt', payload: payload as any }
+      }
+    }
+    // 老形态：JSON { pin, expiresAt }
     try {
-      const parsed = JSON.parse(decodeURIComponent(staffSessionCookie))
+      const parsed = JSON.parse(raw)
       if (parsed.pin && verifyCredentialPin('staff', parsed.pin) && parsed.expiresAt > Date.now()) {
         return { ok: true, via: 'pin', pin: parsed.pin }
       }

@@ -12,7 +12,7 @@ export interface MerchantPinDialogProps {
   open: boolean
   onClose: () => void
   onSuccess: (verifiedAt: number) => void
-  onVerify: (pin: string) => boolean
+  onVerify: (pin: string) => boolean | Promise<boolean>
   title?: string
   hint?: string
 }
@@ -31,14 +31,15 @@ export default function MerchantPinDialog({
 
   if (!open) return null
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  // ⭐ 2026-10-28：onVerify 改成服务端校验（异步），这里改成 async
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (pin.length < 4) {
       setError('PIN 至少 4 位')
       triggerShake()
       return
     }
-    const ok = onVerify(pin)
+    const ok = await onVerify(pin)
     if (ok) {
       setError('')
       setPin('')

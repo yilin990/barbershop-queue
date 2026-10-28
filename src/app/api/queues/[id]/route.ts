@@ -10,15 +10,27 @@
  *   - 店长取消：body.cancelledBy='shop' + body.shopPin 必填，必须通过 verifyAdminPin（防越权）
  *   - 双重安全：DB schema 已 ALTER TABLE 加 cancelledBy/cancelReason 列
  *   - 同时同步 Order 表（如有 orderId 关联）
+ *
+ * 🔴 2026-10-28 鉴权加固（实测漏洞）：
+ *   原来「用户取消」只校验 body.customerPhone —— 而手机号本身是匿名可读的
+ *   （GET /api/queues?phone= 无鉴权），等于「知道手机号就能取消别人的单」。
+ *   现在改成：**登录态里的 phone** 必须等于该单的 customerPhone；
+ *   店员/店长/管理员不受此限。
+ *   另外：状态推进（arrived/serving/completed）原来**完全没有鉴权**，
+ *   任何人 PATCH 就能把别人的单改成「已完成」→ 现在要求门店侧身份。
+ *   DELETE 原来零鉴权 → 现在要求店长/管理员。
  */
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { errorResponse, successResponse } from '@/lib/error'
-import { verifyAdminPin } from '@/lib/admin-auth'
+import { verifyAdminPin } from '@/lib/admin-pin'
 import Database from 'better-sqlite3'
 import path from 'path'
 import { resolveDbPath } from '../../../../lib/db-path'
+import {
+  requireSelfPhone, requireShopSide, requireManagerSide, guardFail, resolveIdentity,
+} from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -52,25 +64,47 @@ export async function PATCH(
       }
 
       if (cancelledBy === 'user') {
-        // 用户取消：customerPhone 必填 + 必须匹配
-        if (!body.customerPhone) {
+        // 用户取消：必须是**登录态里的那个手机号**，不能靠请求参数自证
+        const guard = await requireSelfPhone(request, existing.customerPhone)
+        if (!guard.ok) {
           db.close()
-          return errorResponse(new Error('用户取消必须传 customerPhone'), 400)
+          return guardFail(guard)
         }
-        if (body.customerPhone !== existing.customerPhone) {
+        // 兼容旧前端：body.customerPhone 传了但跟登录态不一致 → 403
+        if (body.customerPhone && body.customerPhone !== existing.customerPhone) {
           db.close()
           return errorResponse(new Error('无权取消他人预约（手机号不匹配）'), 403)
         }
       } else if (cancelledBy === 'shop') {
-        // 店长取消：shopPin 必填 + 必须通过 verifyAdminPin
-        if (!body.shopPin) {
+        // 店长取消：两种凭证任一通过
+        //   ① body.shopPin → 服务端比对哈希（原有行为，店长点两下输 PIN）
+        //   ② 已登录的店长会话（zhilin-token 且 DB role=店长）
+        const identity = await resolveIdentity(request)
+        const isManager = !!identity && identity.isManagerSide
+        if (!body.shopPin && !isManager) {
           db.close()
           return errorResponse(new Error('店长取消必须传 shopPin'), 400)
         }
-        if (!verifyAdminPin(body.shopPin)) {
+        if (body.shopPin && !verifyAdminPin(body.shopPin)) {
           db.close()
           return errorResponse(new Error('店长 PIN 错误'), 403)
         }
+        if (!body.shopPin) {
+          const guard = await requireManagerSide(request, existing.merchantId)
+          if (!guard.ok) {
+            db.close()
+            return guardFail(guard)
+          }
+        }
+      }
+    } else {
+      // ⭐ 2026-10-28：非取消的状态推进（arrived/serving/completed/ stylist…）是**店务操作**
+      //   原来零鉴权 → 任何人都能把别人的单改成「已完成」。
+      //   → 要求门店侧身份（店员/店长/管理员），且只能碰自己业务线的商户。
+      const guard = await requireShopSide(request, existing.merchantId)
+      if (!guard.ok) {
+        db.close()
+        return guardFail(guard)
       }
     }
 
@@ -132,9 +166,20 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
+
+    // ⭐ 2026-10-28：删除是破坏性操作，原来**零鉴权**（任何人 DELETE 就能删掉一条排队记录）。
+    //   → 要求店长/管理员 + 商户范围。
     const db = getDb()
-    db.prepare('DELETE FROM BarberQueue WHERE id = ?').run(id)
+    const existing = db.prepare('SELECT id, merchantId FROM BarberQueue WHERE id = ?').get(id) as any
     db.close()
+    if (!existing) return errorResponse(new Error('订单不存在'), 404)
+
+    const guard = await requireManagerSide(request, existing.merchantId)
+    if (!guard.ok) return guardFail(guard)
+
+    const db2 = getDb()
+    db2.prepare('DELETE FROM BarberQueue WHERE id = ?').run(id)
+    db2.close()
     return successResponse({ ok: true })
   } catch (e: any) {
     return errorResponse(e)

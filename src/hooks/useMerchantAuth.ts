@@ -1,31 +1,26 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { verifyPinHashes } from '@/lib/pin-hash'
-import { BUSINESS_CONFIG } from '@/config/business.config'
 
 /**
  * 店主身份 hook（PIN 验证 + 持久化）
  *
  * ⭐ MEMORY 246 — 奕霖 2026-08-20 17:42 拍板：
  *   商品详情页 + 顶部入口 = 商品管理后台快捷通道
- *   PIN 1234 = 店主（MerchantStaff mock: m_zhilin_001/奕霖/owner）
+ *   需要店主 PIN
  *
  * Cookie: `zhilin-merchant-pin-verified` = "<verifiedAt timestamp>"
  * 有效期：24h（客户端）
+ *
+ * ⭐ 2026-10-28 加固：
+ *   旧版在浏览器里比对 PIN 哈希（pepper + staffPinHashes 来自 business.config.ts），
+ *   而那个配置文件被一堆 'use client' 组件 import → 哈希+pepper 被打进前端包，
+ *   6 位 PIN 可离线爆破（100 万组合，几分钟跑完）。
+ *   现在：浏览器只负责提交 PIN，**判定在服务端**（/api/admin/auth/staff-pin，
+ *   服务端比对 scrypt 哈希 + 限流 5 次锁 15 分钟），通过后服务端下发会话 cookie。
  */
 
 const COOKIE_KEY = 'zhilin-merchant-pin-verified'
 const COOKIE_MAX_AGE = 24 * 60 * 60 // 24h
-
-// ⭐ MEMORY 246 — 默认 PIN（MerchantStaff mock owner PIN）
-// ⭐ 2026-10-12：改为比对哈希，源码与前端产物不再出现明文 PIN
-const PIN_PEPPER: string = (BUSINESS_CONFIG as any).pinPepper || ''
-const H: readonly string[] = (BUSINESS_CONFIG as any).staffPinHashes || []
-const PIN_HASH_BY_MERCHANT: Record<string, readonly string[]> = {
-  m_zhilin_001: H,
-  m_grocery_001: H,
-  '*': H,
-}
 
 function readCookie(name: string): string | null {
   if (typeof document === 'undefined') return null
@@ -47,7 +42,7 @@ export interface MerchantAuthState {
   isMerchant: boolean
   verifiedAt: number | null
   merchantId: string | null
-  verify: (pin: string) => boolean
+  verify: (pin: string) => Promise<boolean>
   logout: () => void
 }
 
@@ -68,13 +63,24 @@ export function useMerchantAuth(merchantId: string): MerchantAuthState {
     setIsHydrated(true)
   }, [])
 
-  const verify = (pin: string): boolean => {
-    const validHashes = PIN_HASH_BY_MERCHANT[merchantId] || PIN_HASH_BY_MERCHANT['*']
-    if (verifyPinHashes(pin, validHashes, PIN_PEPPER)) {
-      const now = Date.now()
-      writeCookie(COOKIE_KEY, String(now), COOKIE_MAX_AGE)
-      setVerifiedAt(now)
-      return true
+  /** ⭐ 服务端校验 PIN（原来在浏览器里比对哈希 = 密钥泄露） */
+  const verify = async (pin: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/admin/auth/staff-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pin }),
+      })
+      const j = await res.json()
+      if (j && j.success) {
+        const now = Date.now()
+        writeCookie(COOKIE_KEY, String(now), COOKIE_MAX_AGE)
+        setVerifiedAt(now)
+        return true
+      }
+    } catch {
+      return false
     }
     return false
   }

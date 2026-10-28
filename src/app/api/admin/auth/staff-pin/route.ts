@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyStaffPin } from '@/lib/staff-auth'
-import { buildSetCookie } from '@/lib/cookie'
+import { verifyStaffPin } from '@/lib/staff-pin'
+import { buildSetCookie, cookieSecure } from '@/lib/cookie'
+import { signToken } from '@/lib/jwt'
 
 export const runtime = 'nodejs'
 
@@ -74,6 +75,17 @@ function recordSuccess(ip: string) {
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request)
 
+  // ⭐ 退出登录：httpOnly 的会话 cookie 只能由服务端清
+  {
+    const rawBody = await request.clone().json().catch(() => ({}))
+    if (String(rawBody?.action || '') === 'logout') {
+      const res = NextResponse.json({ success: true })
+      res.headers.append('Set-Cookie', buildSetCookie('zhilin-staff-session', '', { maxAge: 0, path: '/', httpOnly: true }))
+      res.headers.append('Set-Cookie', buildSetCookie('zhilin-staff-ok', '', { maxAge: 0, path: '/', httpOnly: false }))
+      return res
+    }
+  }
+
   // 检查锁定
   const lock = checkLockout(ip)
   if (lock.locked) {
@@ -131,13 +143,29 @@ export async function POST(request: NextRequest) {
 
     recordSuccess(ip)
 
-    // 设置 staff session cookie（服务端签名 cookie）
+    // ⭐ 2026-10-28：会话凭证改成 JWT（1 小时），不再把明文 PIN 放进 cookie
+    let sessionToken: string
+    try {
+      sessionToken = signToken({ userId: 'staff_pin', phone: '', role: 'staff' }, '1h')
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: `服务端未配置 JWT_SECRET，无法签发会话：${e?.message || 'unknown'}` },
+        { status: 503 },
+      )
+    }
     const expiresAt = Date.now() + 60 * 60 * 1000
-    const sessionValue = JSON.stringify({ pin: pin.trim(), expiresAt })
-    const cookie = buildSetCookie('zhilin-staff-session', sessionValue, {
+    const cookie = buildSetCookie('zhilin-staff-session', sessionToken, {
       maxAge: 60 * 60,
       httpOnly: true,
       sameSite: 'lax',
+      secure: cookieSecure(request),
+    })
+    // 客户端可读的无密钥标记（仅供 UI 判断「已解锁」）
+    const markerCookie = buildSetCookie('zhilin-staff-ok', '1', {
+      maxAge: 60 * 60,
+      httpOnly: false,
+      sameSite: 'lax',
+      secure: cookieSecure(request),
     })
 
     // 写 audit
@@ -149,7 +177,7 @@ export async function POST(request: NextRequest) {
         message: 'PIN 验证成功',
         expiresIn: 60 * 60, // 60 分钟
       },
-      { headers: { 'Set-Cookie': cookie } }
+      { headers: { 'Set-Cookie': `${cookie}, ${markerCookie}` } }
     )
   } catch (e: any) {
     return NextResponse.json(

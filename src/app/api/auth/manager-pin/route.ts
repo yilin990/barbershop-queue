@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { signToken } from '@/lib/jwt'
-import { buildSetCookie } from '@/lib/cookie'
+import { buildSetCookie, cookieSecure } from '@/lib/cookie'
 import { errorResponse, ValidationError, AuthError, RateLimitError } from '@/lib/error'
 import {
   isManagerRole,
@@ -121,8 +121,9 @@ export async function POST(request: NextRequest) {
         maxAge: 30 * 24 * 3600,
         path: '/',
         sameSite: 'lax',
-        httpOnly: false,
-        secure: false,
+        // ⭐ 2026-10-28 加固：httpOnly + Secure
+        httpOnly: true,
+        secure: cookieSecure(request),
       }),
     )
     return response

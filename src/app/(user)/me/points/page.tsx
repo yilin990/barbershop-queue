@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import AppLayout from '@/components/AppLayout'
 import { useUserStore } from '@/stores/userStore'
 import { MEMBERSHIP_TIERS } from '@/domain/membership/tier'
-import { verifyAdminPin, setAdminSession, isAdminAuthed, clearAdminSession, getAdminSessionRemainingMinutes } from '@/lib/admin-auth'
+import { setAdminSession, isAdminAuthed, clearAdminSession, getAdminSessionRemainingMinutes } from '@/lib/admin-auth'
 
 interface MeSummary {
   success: boolean
@@ -218,15 +218,29 @@ export default function PointsPage() {
       longPressTimer.current = null
     }
   }
-  const handlePinSubmit = () => {
-    if (verifyAdminPin(pinInput)) {
-      setAdminSession(pinInput)
-      setAdminMode(true)
-      setAdminMinutesLeft(getAdminSessionRemainingMinutes())
-      setShowPinModal(false)
-      setPinInput('')
-      setPinError(false)
-    } else {
+  // ⭐ 2026-10-28：PIN 改由服务端校验（/api/admin/auth/admin-pin）
+  const handlePinSubmit = async () => {
+    try {
+      const res = await fetch('/api/admin/auth/admin-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pin: pinInput, action: 'verify' }),
+      })
+      const j = await res.json()
+      if (j.success) {
+        setAdminSession(pinInput)
+        setAdminMode(true)
+        setAdminMinutesLeft(getAdminSessionRemainingMinutes())
+        setShowPinModal(false)
+        setPinInput('')
+        setPinError(false)
+      } else {
+        setPinError(true)
+        setPinInput('')
+        setTimeout(() => setPinError(false), 800)
+      }
+    } catch {
       setPinError(true)
       setPinInput('')
       setTimeout(() => setPinError(false), 800)
@@ -234,6 +248,12 @@ export default function PointsPage() {
   }
   const handleAdminLogout = () => {
     clearAdminSession()
+    fetch('/api/admin/auth/admin-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ action: 'logout' }),
+    }).catch(() => {})
     setAdminMode(false)
     setAdminMinutesLeft(0)
   }

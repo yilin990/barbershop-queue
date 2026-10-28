@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { verifyStaffCookie } from '@/lib/staff-auth'
+import { verifyStaffCookie } from '@/lib/staff-session'
 
 export const runtime = 'nodejs'
 

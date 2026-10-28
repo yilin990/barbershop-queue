@@ -2560,8 +2560,7 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                 // ⭐ v1.1.23 (2026-10-05 13:06 奕霖立)：先弹窗显示基础信息，POST 拿到 pickupCode 后再补上
                 const initialPopupOrder = { ...order }
                 setSuccessPopup({ type: 'booking', order: initialPopupOrder })
-                // ⭐ 2026-10-05 01:25 奕霖立：预约提交成功 → 软登录（/orders 等不再弹 LoginModal）
-                useUserStore.getState().softLogin(order.customerPhone, order.customerName)
+                // ⭐ 2026-10-28：软登录挪到 POST 成功之后（需要服务端返回的 queueId 换软会话）
                 // 根治：POST 到 API
                 const stylistCode = dynamicStylists.find(s => s.name === order.stylistName)?.code || null
                 fetch('/api/queues', {
@@ -2585,6 +2584,12 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                     // ⭐ v1.1.23：拿 pickupCode 补进弹窗
                     setSuccessPopup(prev => prev ? { ...prev, order: { ...prev.order, pickupCode: d.pickupCode } } : null)
                   }
+                  // ⭐ 2026-10-28：软登录（/orders 等不再弹 LoginModal）
+                  //   带上服务端返回的 queueId —— 换一份绑定手机号的软会话，
+                  //   之后「查自己的排队/订单」才有登录态（否则接口会 401）。
+                  if (d.success && d.id) {
+                    useUserStore.getState().softLogin(order.customerPhone, order.customerName, d.id)
+                  }
                   loadQueues()
                 }).catch(() => loadQueues())
               }} />
@@ -2607,8 +2612,7 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                 // ⭐ v1.1.23：先弹窗显示基础信息，POST 拿到 pickupCode 后再补上
                 const initialPopupOrder = { ...order }
                 setSuccessPopup({ type: 'ticket', order: initialPopupOrder })
-                // ⭐ 2026-10-05 01:25 奕霖立：取号提交成功 → 软登录（/orders 等不再弹 LoginModal）
-                useUserStore.getState().softLogin(order.customerPhone, order.customerName)
+                // ⭐ 2026-10-28：软登录挪到 POST 成功之后（需要服务端返回的 queueId 换软会话）
                 // 根治：POST 到 API
                 const stylistCode = dynamicStylists.find(s => s.name === order.stylistName)?.code || null
                 fetch('/api/queues', {
@@ -2629,6 +2633,10 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                     arrivedAt: order.scheduledAt,
                   }),
                 }).then(r => r.json()).then(d => {
+                  // ⭐ 2026-10-28：软登录（带上 queueId 换软会话）
+                  if (d.success && d.id) {
+                    useUserStore.getState().softLogin(order.customerPhone, order.customerName, d.id)
+                  }
                   if (d.success) {
                     // v1.1.31 (2026-10-06 18:57 qinghe fix Bug 3 C): server orderNo is authoritative.
                     //   On collision the server auto-increments, so a local B001 may persist as B003.

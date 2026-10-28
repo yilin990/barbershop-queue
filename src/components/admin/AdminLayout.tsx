@@ -3,7 +3,6 @@ import { useState, useEffect, ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  verifyAdminPin,
   setAdminSession,
   isAdminAuthed,
   getAdminSessionRemainingMinutes,
@@ -85,27 +84,44 @@ export function AdminLayout({ children, title, active }: AdminLayoutProps) {
     return () => clearInterval(t)
   }, [])
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  // ⭐ 2026-10-28：PIN 改由服务端校验（/api/admin/auth/admin-pin）
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (!pin) return
     setSubmitting(true)
     setPinError(null)
-    setTimeout(() => {
-      if (verifyAdminPin(pin)) {
+    try {
+      const res = await fetch('/api/admin/auth/admin-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pin, action: 'verify' }),
+      })
+      const j = await res.json()
+      if (j.success) {
         setAdminSession(pin)
         setAuthed(true)
         setRemainingMin(60)
         setPin('')
       } else {
-        setPinError('安全码错误，请联系老板/店长获取')
+        setPinError(j.error || '安全码错误，请联系老板/店长获取')
         setPin('')
       }
+    } catch {
+      setPinError('网络错误，请重试')
+    } finally {
       setSubmitting(false)
-    }, 300)
+    }
   }
 
   const handleLogout = () => {
     clearAdminSession()
+    fetch('/api/admin/auth/admin-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ action: 'logout' }),
+    }).catch(() => {})
     setAuthed(false)
     setRemainingMin(0)
   }

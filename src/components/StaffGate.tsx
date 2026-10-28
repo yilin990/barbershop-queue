@@ -14,7 +14,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { isStaffAuthed, getSessionRemainingMinutes, clearStaffSession } from '@/lib/staff-auth'
+import { isStaffAuthed, getSessionRemainingMinutes, clearStaffSession, hasStaffMarker } from '@/lib/staff-auth'
 
 const ORANGE = '#ffa500'
 const ORANGE_RGBA = '255, 165, 0'
@@ -28,7 +28,9 @@ export default function StaffGate({ children }: { children: React.ReactNode }) {
   const [remainingMin, setRemainingMin] = useState(0)
 
   useEffect(() => {
-    setAuthed(isStaffAuthed())
+    // ⭐ 2026-10-28：会话 cookie 是 httpOnly，JS 读不到；
+    //   服务端同时下发一个不含密钥的标记 cookie（zhilin-staff-ok）供 UI 判断。
+    setAuthed(hasStaffMarker() || isStaffAuthed())
     setRemainingMin(getSessionRemainingMinutes())
     // 每分钟刷新一次剩余时间
     const t = setInterval(() => setRemainingMin(getSessionRemainingMinutes()), 60000)
@@ -62,6 +64,13 @@ export default function StaffGate({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     clearStaffSession()
+    // ⭐ httpOnly 的会话 cookie 只能由服务端清
+    fetch('/api/admin/auth/staff-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ action: 'logout' }),
+    }).catch(() => {})
     setAuthed(false)
     setPin('')
     setError(null)

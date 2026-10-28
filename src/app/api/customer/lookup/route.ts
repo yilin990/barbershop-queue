@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+// ⭐ 2026-10-28：原来只要传 phone 就能查该手机号在商户下的会员信息（积分/消费/订单）→ 按手机号枚举
+import { requireSelfPhone, guardFail } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -28,6 +30,10 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // ⭐ 2026-10-28：只能查自己（登录态 phone 必须一致）；店员/店长不受限
+    const guard = await requireSelfPhone(request, phone)
+    if (!guard.ok) return guardFail(guard)
 
     // 找商户
     const merchants = await prisma.$queryRaw<any[]>`

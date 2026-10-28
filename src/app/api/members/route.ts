@@ -13,6 +13,8 @@ import {
 } from '@/lib/member'
 // v1.1.55 清禾：列表含全部会员余额/流水，开卡是写操作 —— 都要求店长
 import { requireManager } from '@/lib/require-manager'
+// ⭐ 2026-10-28：店长也只能看/动自己业务线下的商户（跨商户 403）
+import { requireManagerSide, guardFail } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -24,6 +26,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const merchantId = assertMerchantId(searchParams.get('merchantId') || '')
+    const scope = await requireManagerSide(request, merchantId)
+    if (!scope.ok) return guardFail(scope)
     const db = getDb()
     try {
       return Response.json({
@@ -50,6 +54,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const merchantId = assertMerchantId(body.merchantId || '')
     const phone = normalizePhone(body.phone || '')
+    const scope = await requireManagerSide(request, merchantId)
+    if (!scope.ok) return guardFail(scope)
 
     db = getDb()
     const card = openCard(db, {

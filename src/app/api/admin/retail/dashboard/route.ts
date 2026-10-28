@@ -12,7 +12,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ADMIN_MERCHANT_ID } from '@/lib/admin-merchant'
-import { verifyStaffCookie } from '@/lib/staff-auth'
+import { verifyStaffCookie } from '@/lib/staff-session'
 import { errorResponse, successResponse, AuthError } from '@/lib/error'
 
 export const runtime = 'nodejs'

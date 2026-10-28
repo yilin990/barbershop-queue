@@ -14,6 +14,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { pushToPhone, getDb, writeLog } from '@/lib/webpush-server'
 import { broadcastCall } from '@/lib/sse-registry'
+// ⭐ 2026-10-28：叫号会往顾客手机推通知，原来零鉴权 → 任何人都能骚扰全店顾客。
+import { requireShopSide, guardFail } from '@/lib/api-auth'
 
 export const runtime = 'nodejs'
 
@@ -26,6 +28,17 @@ export async function POST(
   const { id } = await params
 
   try {
+    // ⭐ 2026-10-28：叫号 = 店务动作 + 推顾客通知 → 必须门店侧身份
+    const db0 = getDb()
+    let merchantId = ''
+    try {
+      const row = db0.prepare('SELECT merchantId FROM BarberQueue WHERE id = ?').get(id) as any
+      merchantId = row?.merchantId || ''
+    } finally {
+      db0.close()
+    }
+    const guard = await requireShopSide(request, merchantId || undefined)
+    if (!guard.ok) return guardFail(guard)
     let body: { force?: boolean } = {}
     try {
       body = await request.json()
