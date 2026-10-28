@@ -36,6 +36,8 @@ import { DEFAULT_MERCHANT_ID } from '@/lib/merchant'
 import PushSetup from '@/components/push/PushSetup'
 import CallListener from '@/components/push/CallListener'
 import { PricingModal, UpgradeBanner } from './PricingModal'
+// ⭐ v1.1.65 清禾 2026-10-28：预约日期三档口径集中到 lib/scheduled-date（today/tomorrow/dayAfter）
+import { scheduledDateLabel, type ScheduledDateKey } from '@/lib/scheduled-date'
 
 // ==============================================
 // 订单类型 + 初始数据
@@ -50,7 +52,7 @@ interface Order {
   stylistName: string
   status: OrderStatus
   scheduledAt: string
-  scheduledDate: 'today' | 'tomorrow' | 'dayAfter'
+  scheduledDate: ScheduledDateKey
   arrivedAt?: string
   startedAt?: string
   completedAt?: string
@@ -261,11 +263,66 @@ function AlreadyBookedPopup({ t, onClose, reason }: { t: any; onClose: () => voi
 }
 
 // ==============================================
+// FutureReservationRow（未来预约行：明天 / 后天）
+// ⭐ v1.1.65 清禾 2026-10-28：抽成可复用的一行，
+//   「明日预约」「后日预约」各一个，避免两段重复 JSX。
+//   排版与原来 v1.1.30 的「明日预约」块完全一致。
+// ==============================================
+function FutureReservationRow({ t, title, count, next, onViewAll }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: any
+  title: string
+  count: number
+  next: Order
+  onViewAll: () => void
+}) {
+  return (
+    <div onClick={onViewAll} style={{ cursor: 'pointer', marginBottom: 12 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 8,
+      }}>
+        <div style={{
+          fontSize: 11, color: t.textMuted,
+          letterSpacing: '0.08em',
+        }}>
+          {title} · {count} 单
+        </div>
+        <div style={{
+          fontSize: 11, color: t.primary, fontWeight: 600,
+        }}>
+          查看全部 →
+        </div>
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 10,
+      }}>
+        <span style={{
+          fontFamily: 'monospace', fontWeight: 700,
+          color: t.primary, fontVariantNumeric: 'tabular-nums',
+          fontSize: 18, minWidth: 56,
+        }}>{next.scheduledAt}</span>
+        <span style={{ flex: 1, fontWeight: 500, fontSize: 14 }}>
+          {next.customerName}
+        </span>
+        {next.stylistName && next.stylistName !== 'Will be assigned' && (
+          <span style={{ color: t.textMuted, fontSize: 11 }}>
+            {next.stylistName}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ==============================================
 // BookingModal（在线预约）
 // ==============================================
 function BookingModal({ t, onClose, onSuccess, stylists, nextNo, reservedBookings, userName, userPhone, now }: {
   t: any; onClose: () => void
-  onSuccess: (order: { id: string; customerName: string; customerPhone: string; service: string; stylistName: string; scheduledAt: string; scheduledDate: 'today' | 'tomorrow'; status: 'reserved' }) => void
+  // ⭐ v1.1.65 清禾 2026-10-28 bug 修复：类型签名补上 'dayAfter'
+  //   （原来只写 'today' | 'tomorrow'，类型层面就把「后天」排除了）
+  onSuccess: (order: { id: string; customerName: string; customerPhone: string; service: string; stylistName: string; scheduledAt: string; scheduledDate: ScheduledDateKey; status: 'reserved' }) => void
   stylists: { id: string; name: string; specialties: string[]; yearsOfExp: number; rating: number; startPrice: number }[]
   nextNo: string
   reservedBookings: { stylistName: string; scheduledAt: string; scheduledDate: string; customerName: string }[]
@@ -380,7 +437,9 @@ function BookingModal({ t, onClose, onSuccess, stylists, nextNo, reservedBooking
         service: serviceType,
         stylistName: actualStylist,  // ⭐ 2026-10-05 00:39 奕霖立：用解析后的实际理发师
         scheduledAt: timeSlot,
-        scheduledDate: dateKey === 'dayAfter' ? 'tomorrow' : dateKey,
+        // ⭐ v1.1.65 清禾 2026-10-28 bug 修复：原代码 `dateKey === 'dayAfter' ? 'tomorrow' : dateKey`
+        //   把「后天」降级成「明天」写进库 —— 现在原样透传三档
+        scheduledDate: dateKey,
         status: 'reserved',
       })
     } catch (e: any) {
@@ -1090,8 +1149,9 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
   }, [successPopup !== null])
   // ⭐ v1.1.23 取消确认弹窗状态（替抂 browser confirm()）
   const [cancelPopup, setCancelPopup] = useState<null | { order: any; label: string }>(null)
-  // ⭐ 2026-10-06 12:50 清禾改：v1.1.30 - 「明日全部预约」弹窗状态
-  const [showTomorrowListModal, setShowTomorrowListModal] = useState(false)
+  // ⭐ v1.1.65 清禾 2026-10-28：「未来预约（明天/后天）」列表弹窗状态
+  //   原来只有 showTomorrowListModal（只认 tomorrow 一档，后天单点不进去）
+  const [futureListDate, setFutureListDate] = useState<'tomorrow' | 'dayAfter' | null>(null)
 
   // 时间同步
   useEffect(() => {
@@ -1297,6 +1357,15 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
     return groups
   }, [arrivedOrders, reservedTodayOrders, stylistsList])
   const reservedTomorrowOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'tomorrow').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  // ⭐ v1.1.65 清禾 2026-10-28：第三档「后天」独立过滤
+  //   修好发送端后商家端真的会收到 scheduledDate='dayAfter' 的单，读取端不认这档就等于数据存了但看不见
+  const reservedDayAfterOrders = orders.filter(o => o.status === 'reserved' && o.scheduledDate === 'dayAfter').sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+  // ⭐ v1.1.65：未来预约列表弹窗当前要展示的那一档
+  const futureListOrders = futureListDate === 'dayAfter'
+    ? reservedDayAfterOrders
+    : futureListDate === 'tomorrow'
+      ? reservedTomorrowOrders
+      : []
   const activeOrders = orders.filter(o => o.status === 'serving' || o.status === 'arrived' || o.status === 'reserved')
   const currentServing = servingOrders[0]
   // ⭐ v1.1.24.1 (2026-10-05 16:00 奕霖立)：实时北京时间（wall clock）
@@ -1309,6 +1378,8 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
   // ⭐ 2026-10-05 00:56 奕霖立：实时队列信息（下一位预约、预计等待）
   const nextTodayReservation = reservedTodayOrders[0]
   const nextTomorrowReservation = reservedTomorrowOrders[0]
+  // ⭐ v1.1.65 清禾 2026-10-28：后天档的下一位预约
+  const nextDayAfterReservation = reservedDayAfterOrders[0]
   // ⭐ v1.1.20 (2026-10-05 12:25 奕霖立)：修公式漏 servingOrders 的 bug
   // 预计等待：新客走到店需等 服务中 + 已到店 + 今日预约 全中 × 15 分钟/人
   // v1.1.38 (2026-10-06 21:13 qinghe fix): ETA must divide by the number of chairs, not 1.
@@ -1388,6 +1459,14 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                 }}>
                   {userNumber}
                 </div>
+                {/* ⭐ v1.1.65 清禾 2026-10-28：预约档位（今天/明天/后天）+ 时段
+                    后天单以前既写不进库也看不出来，现在顾客一眼能看到是哪天 */}
+                {myActiveOrder?.status === 'reserved' && (
+                  <div style={{ fontSize: 12, opacity: 0.95, marginTop: 2 }}>
+                    {scheduledDateLabel(myActiveOrder.scheduledDate) || '今天'} {myActiveOrder.scheduledAt}
+                    {myActiveOrder.stylistName ? ' · ' + myActiveOrder.stylistName + ' 老师' : ''}
+                  </div>
+                )}
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -1689,7 +1768,11 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                           </div>
                           <div style={{ fontSize: 11, color: t.textSecondary, marginTop: 2 }}>
                             {o.service} · {o.stylistName} 老师
-                            {o.scheduledDate === 'tomorrow' && <span style={{ marginLeft: 6, color: t.primary, fontWeight: 600 }}>· 明天</span>}
+                            {/* ⭐ v1.1.65 清禾 2026-10-28：明天/后天 都要标出来
+                                （原来只认 tomorrow，后天单会被标成「明天」） */}
+                            {o.scheduledDate !== 'today' && scheduledDateLabel(o.scheduledDate) && (
+                              <span style={{ marginLeft: 6, color: t.primary, fontWeight: 600 }}>· {scheduledDateLabel(o.scheduledDate)}</span>
+                            )}
                           </div>
                         </div>
                         <span style={{
@@ -1881,7 +1964,7 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                       今日还有 {reservedTodayOrders.length} 单已预约
                     </div>
                   </>
-                ) : nextTomorrowReservation ? (
+                ) : (nextTomorrowReservation || nextDayAfterReservation) ? (
                   <>
                     {/* ⭐ 2026-10-06 12:55 清禾改：v1.1.31 - 删「暂无服务」label + 删卡框，纯文字排版 */}
                     <div style={{
@@ -1892,64 +1975,46 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
                     }}>
                       {currentBeijingTime}
                     </div>
-                    {/* 整块可点击区域：明日预约数 + 下一位预约 */}
-                    <div
-                      onClick={() => setShowTomorrowListModal(true)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        marginBottom: 8,
-                      }}>
-                        <div style={{
-                          fontSize: 11, color: t.textMuted,
-                          letterSpacing: '0.08em',
-                        }}>
-                          明日预约 · {reservedTomorrowOrders.length} 单
-                        </div>
-                        <div style={{
-                          fontSize: 11, color: t.primary, fontWeight: 600,
-                        }}>
-                          查看全部 →
-                        </div>
-                      </div>
-                      <div style={{
-                        display: 'flex', alignItems: 'baseline', gap: 10,
-                      }}>
-                        <span style={{
-                          fontFamily: 'monospace', fontWeight: 700,
-                          color: t.primary, fontVariantNumeric: 'tabular-nums',
-                          fontSize: 18, minWidth: 56,
-                        }}>{nextTomorrowReservation.scheduledAt}</span>
-                        <span style={{ flex: 1, fontWeight: 500, fontSize: 14 }}>
-                          {nextTomorrowReservation.customerName}
-                        </span>
-                        {nextTomorrowReservation.stylistName && nextTomorrowReservation.stylistName !== 'Will be assigned' && (
-                          <span style={{ color: t.textMuted, fontSize: 11 }}>
-                            {nextTomorrowReservation.stylistName}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {/* 弹窗：明日全部预约 */}
-                    {showTomorrowListModal && (
-                      <ModalOverlay t={t} onClose={() => setShowTomorrowListModal(false)}>
-                        <ModalHeader title="明日全部预约" onClose={() => setShowTomorrowListModal(false)} t={t} />
+                    {/* 未来预约（明天 / 后天）—— ⭐ v1.1.65 清禾 2026-10-28
+                        原来只有「明日预约」一档；发送端修好后商家端会真的出现「后天」单，
+                        没有展示位就等于数据存进去了但店长看不见 */}
+                    {nextTomorrowReservation && (
+                      <FutureReservationRow
+                        t={t}
+                        title="明日预约"
+                        count={reservedTomorrowOrders.length}
+                        next={nextTomorrowReservation}
+                        onViewAll={() => setFutureListDate('tomorrow')}
+                      />
+                    )}
+                    {nextDayAfterReservation && (
+                      <FutureReservationRow
+                        t={t}
+                        title="后日预约"
+                        count={reservedDayAfterOrders.length}
+                        next={nextDayAfterReservation}
+                        onViewAll={() => setFutureListDate('dayAfter')}
+                      />
+                    )}
+                    {/* 弹窗：未来预约全部（明天 / 后天）⭐ v1.1.65 */}
+                    {futureListDate && (
+                      <ModalOverlay t={t} onClose={() => setFutureListDate(null)}>
+                        <ModalHeader title={futureListDate === 'tomorrow' ? '明日全部预约' : '后日全部预约'} onClose={() => setFutureListDate(null)} t={t} />
                         <div style={{ padding: 20 }}>
                           <div style={{
                             fontSize: 11, color: t.textMuted,
                             letterSpacing: '0.08em', marginBottom: 16,
                           }}>
-                            共 {reservedTomorrowOrders.length} 单 · 按时间排序
+                            共 {futureListOrders.length} 单 · 按时间排序
                           </div>
                           <div style={{
                             display: 'flex', flexDirection: 'column', gap: 0,
                           }}>
-                            {reservedTomorrowOrders.map((o, i) => (
+                            {futureListOrders.map((o, i) => (
                               <div key={o.id} style={{
                                 display: 'flex', alignItems: 'baseline', gap: 10,
                                 padding: '12px 0',
-                                borderBottom: i < reservedTomorrowOrders.length - 1
+                                borderBottom: i < futureListOrders.length - 1
                                   ? `1px solid ${t.border}`
                                   : 'none',
                               }}>
@@ -2704,7 +2769,7 @@ export default function BookingSection({ merchantId = DEFAULT_MERCHANT_ID }: { m
               }}>
                 <div>👤 <b>{successPopup.order.customerName}</b> · 📞 {successPopup.order.customerPhone}</div>
                 <div>💇 {successPopup.order.service} · 理发师 <b>{successPopup.order.stylistName}</b></div>
-                <div>🕒 {successPopup.type === 'booking' ? '预约时间' : '取号时间'}：<b>{successPopup.order.scheduledAt}</b></div>
+                <div>🕒 {successPopup.type === 'booking' ? '预约时间' : '取号时间'}：<b>{successPopup.type === 'booking' && scheduledDateLabel(successPopup.order.scheduledDate) ? scheduledDateLabel(successPopup.order.scheduledDate) + ' ' + successPopup.order.scheduledAt : successPopup.order.scheduledAt}</b></div>
               </div>
 
               {/* ⭐ v1.1.23 双按钮 + 5s 自动关闭 */}

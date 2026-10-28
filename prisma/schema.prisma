@@ -664,7 +664,7 @@ model BarberQueue {
   stylistCode String?                                   // 理发师 3 位数编号
   status      String   @default("reserved")             // reserved | arrived | serving | completed | no_show
   scheduledAt String                                    // 时段 (booking) 或 HH:mm (ticket)
-  scheduledDate String  @default("today")              // today | tomorrow
+  scheduledDate String  @default("today")              // today | tomorrow | dayAfter
   arrivedAt   String?
   startedAt   String?
   completedAt String?
