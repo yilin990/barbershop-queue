@@ -36,8 +36,24 @@ function hasAdminToken(request: NextRequest): boolean {
   return false
 }
 
+/**
+ * ⭐ 安全 P0 修复 (2026-10-28)：后台系 API 前缀匹配
+ *
+ * 原来只判断 path.startsWith('/api/admin/')，
+ * 而 /api/admin-v2/* 不以 '/api/admin/' 开头 ⇒ 整个 admin-v2 后台接口匿名可读
+ * （实测 GET /api/admin-v2/dashboard 匿名 200，泄露今日订单/营收/会员/操作日志）。
+ *
+ * 现在改成：/api/ 下第一段以 admin 开头就算后台接口 ——
+ *   admin / admin-v2 / adminv2 / admin_v2 / admin-v3 … 全部覆盖，未来新增变体也不会漏。
+ *
+ * 登录/会话端点仍然豁免：/api/admin/auth/*、/api/admin-v2/auth/* …
+ */
+const ADMIN_API_PREFIX_RE = /^\/api\/admin[^/]*(?:\/|$)/i
+const ADMIN_AUTH_EXEMPT_RE = /^\/api\/admin[^/]*\/auth(?:\/|$)/i
+
 function isAdminAuthPath(path: string): boolean {
-  return path.startsWith('/api/admin/') && !path.startsWith('/api/admin/auth/')
+  if (!ADMIN_API_PREFIX_RE.test(path)) return false
+  return !ADMIN_AUTH_EXEMPT_RE.test(path)
 }
 
 export function middleware(request: NextRequest) {

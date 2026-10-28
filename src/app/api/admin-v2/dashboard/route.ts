@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { verifyAdminRequest, unauthorized } from '@/lib/admin-jwt-auth'
 
 export const runtime = 'nodejs'
 
@@ -7,8 +8,16 @@ export const runtime = 'nodejs'
  * GET /api/admin-v2/dashboard
  * 商户后台 v2 仪表盘
  * 100% raw SQL（避免 prisma 7 schema validate bug 导致 model 不同步）
+ *
+ * ⭐ 安全 P0 修复 (2026-10-28)：本路由原先没有任何鉴权，
+ *   middleware 的 '/api/admin/' 前缀匹配又不覆盖 '/api/admin-v2/' ⇒ 匿名可读经营数据。
+ *   现在补上与 /api/admin/* 同一套鉴权（admin-jwt-auth：JWT cookie / Bearer / PIN cookie）。
  */
 export async function GET(request: NextRequest) {
+  // 双保险：middleware 已挡匿名，这里再做一次真实凭据校验
+  const auth = verifyAdminRequest(request)
+  if (!auth.ok) return unauthorized(auth)
+
   try {
     const now = new Date()
     const cnMidnight = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
