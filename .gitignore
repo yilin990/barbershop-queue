@@ -105,3 +105,6 @@ data/manager-pin.json
 
 # 2026-10-28 鉴权加固隔离构建目录
 .next-authfix/
+
+# 2026-10-28 清禾：JWT 密钥（fail-closed 用，运维放不进 git）
+data/jwt.secret
