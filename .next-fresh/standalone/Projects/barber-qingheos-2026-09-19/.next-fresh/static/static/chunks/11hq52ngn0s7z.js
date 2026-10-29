@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,622734,e=>{"use strict";var t=e.i(860265);let r=void 0!==t.default&&t.default.env.NEXT_PUBLIC_MERCHANT_ID||"m_barber_001";e.s(["DEFAULT_MERCHANT_ID",0,r,"resolveMerchantIdFromQuery",0,function(e){return e&&(e.get("merchantId")||e.get("mid"))||null}])}]);

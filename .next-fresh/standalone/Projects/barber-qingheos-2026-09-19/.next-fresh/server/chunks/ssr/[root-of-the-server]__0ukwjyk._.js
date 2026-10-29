@@ -1,0 +1,18 @@
+module.exports=[918622,(a,b,c)=>{b.exports=a.x("next/dist/compiled/next-server/app-page-turbo.runtime.prod.js",()=>require("next/dist/compiled/next-server/app-page-turbo.runtime.prod.js"))},832319,(a,b,c)=>{b.exports=a.x("next/dist/server/app-render/work-unit-async-storage.external.js",()=>require("next/dist/server/app-render/work-unit-async-storage.external.js"))},556704,(a,b,c)=>{b.exports=a.x("next/dist/server/app-render/work-async-storage.external.js",()=>require("next/dist/server/app-render/work-async-storage.external.js"))},324725,(a,b,c)=>{b.exports=a.x("next/dist/server/app-render/after-task-async-storage.external.js",()=>require("next/dist/server/app-render/after-task-async-storage.external.js"))},120635,(a,b,c)=>{b.exports=a.x("next/dist/server/app-render/action-async-storage.external.js",()=>require("next/dist/server/app-render/action-async-storage.external.js"))},43285,(a,b,c)=>{b.exports=a.x("next/dist/server/app-render/dynamic-access-async-storage.external.js",()=>require("next/dist/server/app-render/dynamic-access-async-storage.external.js"))},949216,(a,b,c)=>{"use strict";b.exports=a.r(918622)},499622,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored["react-ssr"].ReactJsxRuntime},416897,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored["react-ssr"].React},369613,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored.contexts.AppRouterContext},34066,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored.contexts.HooksClientContext},968588,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored.contexts.ServerInsertedHtml},686265,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored["react-ssr"].ReactDOM},753177,(a,b,c)=>{"use strict";b.exports=a.r(949216).vendored["react-ssr"].ReactServerDOMTurbopackClient},775271,a=>{"use strict";a.s(["BUSINESS_CONFIG",0,{id:"barber-001",type:"salon",name:"造型师助手（铜仁市碧江区店）",shortName:"造型师助手",slogan:"您的专属造型顾问",description:"AI赋能 · 去中心化 · 美在身边。造型师助手，铜仁人自己的发型顾问，记住每位客人的脸型与发型史。",brandStory:{title:"造型师助手",subtitle:"您身边的美发顾问",paragraphs:["造型师助手是一家扎根铜仁市碧江区的智能发型顾问。无论您是上班族、宝妈、学生党、还是准备约会，我们都能根据您的脸型、发质、肤色，给出最适合您的发型建议。",'"近一点，再近一点" 是我们的服务承诺。每位客人都享受专属造型师 1v1 咨询，从脸型分析到染发配色，全程陪伴。踩雷少了，满意多了。',"造型师 AI 10:00-22:00 在线陪伴：不知道剪什么？问造型师。担心染发色适不适合？问造型师。想换个新发型又怕踩雷？问造型师。"],highlights:[{icon:"💇",label:"脸型推荐"},{icon:"🎨",label:"染发配色"},{icon:"📅",label:"预约提醒"},{icon:"🤖",label:"造型师 24h"}]},contact:{phone:"+86 18 30 85 67 187",address:"贵州省铜仁市碧江区",coords:[109.200269,27.732818],hours:"10:00-22:00"},theme:{bgDeep:"#faf6f0",bgCard:"#fffaf0",bgCardHover:"#f5ead3",teal:"#b8860b",tealDark:"#8b6508",tealGlow:"rgba(184, 134, 11, 0.12)",green:"##b8860b",greenDark:"#1b5e20",text:"#2c1810",textSecondary:"#5d4037",textMuted:"#8d6e63",glassBorder:"rgba(184, 134, 11, 0.22)",accent:"#8b0000"},assets:{logo:"/merchant-logo.jpg",banner:"/zhilin-banner-logo.jpg",qrcode:"/merchant-qr.png",favicon:"/favicon.ico"}}])},863341,a=>{"use strict";var b=a.i(499622),c=a.i(775271);a.s(["ConfigProvider",0,function({children:a}){let d=c.BUSINESS_CONFIG.theme;return(0,b.jsxs)(b.Fragment,{children:[(0,b.jsx)("style",{children:`
+        :root {
+          --bg-deep: ${d.bgDeep};
+          --bg-card: ${d.bgCard};
+          --bg-card-hover: ${d.bgCardHover};
+          --teal: ${d.teal};
+          --teal-dark: ${d.tealDark};
+          --teal-glow: ${d.tealGlow};
+          --green: ${d.green};
+          --text: ${d.text};
+          --text-secondary: ${d.textSecondary};
+          --text-muted: ${d.textMuted};
+          --glass-border: ${d.glassBorder};
+          --accent: ${d.accent};
+        }
+      `}),a]})}])}];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__0ukwjyk._.js.map

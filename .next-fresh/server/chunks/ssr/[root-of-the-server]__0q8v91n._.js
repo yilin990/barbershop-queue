@@ -1,0 +1,8 @@
+module.exports=[286493,a=>{"use strict";var b=a.i(552469),c=a.i(515288);let d=new Map;async function e(b){if(!b||b===c.BUSINESS_CONFIG.id||"zhilin"===b)return c.BUSINESS_CONFIG;if(d.has(b))return d.get(b);try{{let c=await a.A(260815),e=(await a.A(589793)).join(process.cwd(),"data","merchants",b,"config.json"),f=await c.readFile(e,"utf-8"),g=JSON.parse(f);return d.set(b,g),g}}catch{}return c.BUSINESS_CONFIG}var f=a.i(351284);async function g({params:a}){let{merchantId:b}=await a,c=await e(b);return{title:`${c.name} - ${c.slogan}`,description:c.description,icons:{icon:c.assets.favicon}}}async function h({children:a,params:c}){let{merchantId:d}=await c,g=await e(d);return!function(a){if(!(!(a.startsWith("/api/")||a.startsWith("/_next/")||a.startsWith("/favicon")||a.includes("."))&&1))return;let b=a.split("/").filter(Boolean);0===b.length||b[0]}(`/${d}`),(0,b.jsx)("html",{lang:"zh-CN","data-merchant-id":g.id,children:(0,b.jsx)("body",{children:(0,b.jsxs)(f.ConfigProvider,{children:[(0,b.jsx)("style",{children:`
+            :root[data-merchant-id="${g.id}"] {
+              --merchant-primary: ${g.theme.bgDeep};
+              --merchant-accent: ${g.theme.green};
+            }
+          `}),a]})})})}a.s(["default",0,h,"generateMetadata",0,g],286493)},730676,a=>{a.n(a.i(286493))},260815,a=>{a.v(b=>Promise.all(["server/chunks/ssr/[externals]_fs_promises_022gqgn._.js"].map(b=>a.l(b))).then(()=>b(924868)))},589793,a=>{a.v(a=>Promise.resolve().then(()=>a(814747)))}];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__0q8v91n._.js.map

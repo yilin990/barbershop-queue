@@ -1,0 +1,3 @@
+{
+  "/api/admin/coupons/batch/route": "app/api/admin/coupons/batch/route.js"
+}

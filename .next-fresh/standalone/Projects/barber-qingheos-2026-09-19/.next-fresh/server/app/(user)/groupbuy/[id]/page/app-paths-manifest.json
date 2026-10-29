@@ -1,0 +1,3 @@
+{
+  "/(user)/groupbuy/[id]/page": "app/(user)/groupbuy/[id]/page.js"
+}

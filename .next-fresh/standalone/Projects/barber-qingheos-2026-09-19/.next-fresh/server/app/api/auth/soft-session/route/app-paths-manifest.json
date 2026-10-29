@@ -1,0 +1,3 @@
+{
+  "/api/auth/soft-session/route": "app/api/auth/soft-session/route.js"
+}
