@@ -108,6 +108,16 @@ export async function PATCH(
       }
     }
 
+    // ⭐ 2026-11-02 清禾修：status 值白名单校验。
+    //   原来 allowed 只管「字段名能不能改」，不管「值合不合法」——
+    //   任意字符串都能被写进 status，污染状态机与活动流。
+    //   合法值取自 schema 注释 + DB 实际用到的集合（含 cancelled）。
+    const QUEUE_STATUS_WHITELIST = ['reserved', 'arrived', 'serving', 'completed', 'no_show', 'cancelled']
+    if (body.status !== undefined && !QUEUE_STATUS_WHITELIST.includes(body.status)) {
+      db.close()
+      return errorResponse(new Error(`status 非法，可选值：${QUEUE_STATUS_WHITELIST.join(' / ')}`), 400)
+    }
+
     // 构建 SET 子句
     const updates: string[] = []
     const values: any[] = []

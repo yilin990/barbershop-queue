@@ -108,3 +108,6 @@ data/manager-pin.json
 
 # 2026-10-28 清禾：JWT 密钥（fail-closed 用，运维放不进 git）
 data/jwt.secret
+
+# 2026-11-02 修复构建产物目录
+.next-fix*

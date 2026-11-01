@@ -193,8 +193,13 @@ export async function POST(request: NextRequest) {
     let pickupCode: string | null = null
     try {
       // 查 customer（用 Prisma 只读 OK）
+      // ⭐ 2026-11-02 清禾修跨租户串档：必须带 merchantId 过滤。
+      //   原来只按 phone 查，Customer 表是多租户的（@@unique([merchantId, phone])），
+      //   同一个手机号在别的商户有行时就会命中别人的 Customer，
+      //   导致理发店的 Order.customerId 指向果蔬店的客户（实测串档 8 条）。
+      //   加了 merchantId 后找不到本商户客户就返回 null，customerId 留空 —— 不编造数据。
       const customer = await prisma.customer.findFirst({
-        where: { phone: customerPhone },
+        where: { phone: customerPhone, merchantId },
         select: { id: true },
       })
 
